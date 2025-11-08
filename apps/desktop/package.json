@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.22.0",
+    "@google/genai": "^1.29.0",
     "dotenv": "^17.2.3",
     "electron": "^29.4.0",
     "react": "^19.0.0",

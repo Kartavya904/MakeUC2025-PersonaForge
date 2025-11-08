@@ -4,6 +4,7 @@ import path from "node:path";
 import dotenv from "dotenv";
 import { sttStart, sttPush, sttStopAndTranscribe } from "./services/stt-eleven";
 import { ttsStream } from "./services/tts-eleven";
+import { createGeminiService, GeminiPlannerService } from "./services/nlp-gemini";
 
 function loadEnv() {
   // candidates: when running from dist-electron/main.cjs
@@ -25,6 +26,7 @@ loadEnv();
 const isDev = !!process.env.RENDERER_URL;
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let geminiService: GeminiPlannerService | null = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -75,7 +77,18 @@ function createWindow() {
   } catch {}
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // Initialize Gemini service
+  geminiService = createGeminiService();
+  if (geminiService) {
+    console.log("[main] Gemini AI planner initialized");
+  } else {
+    console.warn("[main] Gemini disabled - add GEMINI_API_KEY to .env");
+  }
+  
+  createWindow();
+});
+
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
@@ -125,8 +138,31 @@ ipcMain.handle("tts:speak", async (_e, text: string) => {
   }
 });
 
-/* ============== NLP stub (optional) ============== */
+/* ============== NLP with Gemini ============== */
 
 ipcMain.handle("nlp:ask", async (_e, prompt: string) => {
-  return `You said: "${prompt}". (Replace with real LLM call later.)`;
+  console.log("[main] nlp:ask:", prompt);
+  mainWindow?.webContents.send("app:status", "processing");
+  
+  try {
+    if (!geminiService) {
+      console.warn("[main] Gemini not available, using mock");
+      mainWindow?.webContents.send("app:status", "idle");
+      return `You said: "${prompt}". Add GEMINI_API_KEY to .env for AI planning.`;
+    }
+
+    // Generate task plan with Gemini
+    const plan = await geminiService.generateTaskPlan(prompt);
+    
+    // Format response for user
+    const response = `Task: ${plan.task}\nRisk: ${plan.risk}\n\nSteps:\n${plan.steps.map((s, i) => `${i + 1}. ${s.op} ${s.target || s.app || s.text || ''}`).join('\n')}`;
+    
+    mainWindow?.webContents.send("app:status", "idle");
+    console.log("[main] Generated plan:", plan);
+    return response;
+  } catch (err) {
+    mainWindow?.webContents.send("app:status", "idle");
+    console.error("[main] Gemini error:", err);
+    return `Error: ${String(err)}`;
+  }
 });
