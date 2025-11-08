@@ -148,21 +148,42 @@ ipcMain.handle("nlp:ask", async (_e, prompt: string) => {
     if (!geminiService) {
       console.warn("[main] Gemini not available, using mock");
       mainWindow?.webContents.send("app:status", "idle");
-      return `You said: "${prompt}". Add GEMINI_API_KEY to .env for AI planning.`;
+      
+      // Return JSON even for mock
+      const mockPlan = {
+        task: prompt,
+        risk: "low",
+        steps: [{
+          op: "Confirm",
+          text: "Add GEMINI_API_KEY to .env for AI planning"
+        }]
+      };
+      return JSON.stringify(mockPlan, null, 2);
     }
 
     // Generate task plan with Gemini
     const plan = await geminiService.generateTaskPlan(prompt);
     
-    // Format response for user
-    const response = `Task: ${plan.task}\nRisk: ${plan.risk}\n\nSteps:\n${plan.steps.map((s, i) => `${i + 1}. ${s.op} ${s.target || s.app || s.text || ''}`).join('\n')}`;
-    
     mainWindow?.webContents.send("app:status", "idle");
-    console.log("[main] Generated plan:", plan);
-    return response;
+    console.log("[main] Generated action plan:", plan);
+    
+    // Return the JSON plan as a string for display AND as data
+    // Send the actual plan object to renderer for execution
+    mainWindow?.webContents.send("plan:ready", plan);
+    
+    // Return formatted JSON string for display in Reply panel
+    return JSON.stringify(plan, null, 2);
   } catch (err) {
     mainWindow?.webContents.send("app:status", "idle");
     console.error("[main] Gemini error:", err);
-    return `Error: ${String(err)}`;
+    
+    // Return error as JSON
+    const errorPlan = {
+      task: prompt,
+      risk: "low",
+      error: String(err),
+      steps: []
+    };
+    return JSON.stringify(errorPlan, null, 2);
   }
 });
