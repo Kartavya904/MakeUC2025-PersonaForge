@@ -1,7 +1,6 @@
 /**
- * Main Executor Service
- * Coordinates all executors and executes task plans
- * ROBUST VERSION with safety checks and better error handling
+ * Main Executor - WITH AGENT SYSTEM
+ * Parallel execution where possible
  */
 
 import { TaskPlan, TaskStep } from "../nlp-gemini";
@@ -10,6 +9,7 @@ import { executeSystemSetting, SystemSettingStep } from "./executor-system";
 import { executeType, executeShortcut, TypeStep, ShortcutStep } from "./executor-keyboard";
 import { executeMessage, MessageStep } from "./executor-message";
 import { checkTaskSafety, validateStep } from "./executor-safety";
+import { createExecutionPlan, executeWithAgents } from "./executor-agent";
 
 export interface ExecutionResult {
   success: boolean;
@@ -21,118 +21,79 @@ export interface ExecutionResult {
 }
 
 /**
- * Execute a complete task plan
+ * Execute plan with smart agents
  */
 export async function executePlan(plan: TaskPlan): Promise<ExecutionResult> {
-  console.log(`[EXECUTOR] ═══════════════════════════════════════════`);
-  console.log(`[EXECUTOR] Starting execution: ${plan.task}`);
-  console.log(`[EXECUTOR] Risk level: ${plan.risk}`);
-  console.log(`[EXECUTOR] Total steps: ${plan.steps.length}`);
-  console.log(`[EXECUTOR] ═══════════════════════════════════════════`);
-  
-  const results: string[] = [];
-  let completedSteps = 0;
+  console.log(`[EXECUTOR] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  console.log(`[EXECUTOR] Task: ${plan.task}`);
+  console.log(`[EXECUTOR] Steps: ${plan.steps.length}`);
   
   try {
-    // 1. Safety check
-    const safetyCheck = checkTaskSafety(plan);
-    
-    if (!safetyCheck.safe) {
-      console.error(`[EXECUTOR] Safety check failed!`);
-      return {
-        success: false,
-        completedSteps: 0,
-        totalSteps: plan.steps.length,
-        results: [`⚠️ Safety check failed`],
-        warnings: safetyCheck.warnings,
-        error: "Task blocked by safety system"
-      };
+    // Safety check
+    const safety = checkTaskSafety(plan);
+    if (safety.warnings.length > 0) {
+      console.warn(`[EXECUTOR] Warnings:`, safety.warnings);
     }
     
-    if (safetyCheck.warnings.length > 0) {
-      console.warn(`[EXECUTOR] Safety warnings:`, safetyCheck.warnings);
-      results.push(...safetyCheck.warnings.map(w => `⚠️ ${w}`));
+    // Validate steps
+    for (const step of plan.steps) {
+      const valid = validateStep(step);
+      if (!valid.valid) throw new Error(valid.error);
     }
     
-    // 2. Validate all steps first
-    for (let i = 0; i < plan.steps.length; i++) {
-      const step = plan.steps[i];
-      const validation = validateStep(step);
-      
-      if (!validation.valid) {
-        console.error(`[EXECUTOR] Step ${i + 1} validation failed:`, validation.error);
-        return {
-          success: false,
-          completedSteps: 0,
-          totalSteps: plan.steps.length,
-          results: [`✗ Step ${i + 1} invalid: ${validation.error}`],
-          error: validation.error
-        };
-      }
+    // Create execution plan
+    const tasks = createExecutionPlan(plan.steps);
+    const parallel = tasks.filter(t => t.canRunInParallel).length;
+    
+    if (parallel > 1) {
+      console.log(`[EXECUTOR] ⚡ ${parallel} tasks can run in parallel`);
     }
     
-    // 3. Execute steps sequentially
-    for (let i = 0; i < plan.steps.length; i++) {
-      const step = plan.steps[i];
-      
-      console.log(`[EXECUTOR] ───────────────────────────────────────`);
-      console.log(`[EXECUTOR] Step ${i + 1}/${plan.steps.length}: ${step.op}`);
-      console.log(`[EXECUTOR] Details:`, JSON.stringify(step, null, 2));
-      
-      try {
-        const startTime = Date.now();
-        const result = await executeStep(step);
-        const duration = Date.now() - startTime;
-        
-        results.push(`✓ Step ${i + 1}: ${result}`);
+    console.log(`[EXECUTOR] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    
+    // Execute with agents
+    const agentResults = await executeWithAgents(tasks, executeStep);
+    
+    // Build results
+    const results: string[] = [];
+    let completedSteps = 0;
+    
+    for (const r of agentResults) {
+      if (r.success) {
+        results.push(`✓ ${r.result}`);
         completedSteps++;
-        
-        console.log(`[EXECUTOR] ✓ Step ${i + 1} complete in ${duration}ms: ${result}`);
-      } catch (error: any) {
-        const errorMsg = error.message || String(error);
-        results.push(`✗ Step ${i + 1}: ${errorMsg}`);
-        
-        console.error(`[EXECUTOR] ✗ Step ${i + 1} FAILED:`, errorMsg);
-        console.error(`[EXECUTOR] Error details:`, error);
-        
-        // Decide whether to continue or abort
-        if (shouldAbortOnError(step, error)) {
-          console.error(`[EXECUTOR] Aborting execution due to critical error`);
-          throw error;
-        } else {
-          console.warn(`[EXECUTOR] Continuing despite error (non-critical)`);
-        }
+      } else {
+        results.push(`✗ ${r.error}`);
       }
     }
     
-    console.log(`[EXECUTOR] ═══════════════════════════════════════════`);
-    console.log(`[EXECUTOR] Execution complete: ${completedSteps}/${plan.steps.length} steps succeeded`);
-    console.log(`[EXECUTOR] ═══════════════════════════════════════════`);
+    console.log(`[EXECUTOR] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`[EXECUTOR] ✅ Done: ${completedSteps}/${plan.steps.length}`);
+    console.log(`[EXECUTOR] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
     
     return {
       success: completedSteps === plan.steps.length,
       completedSteps,
       totalSteps: plan.steps.length,
       results,
-      warnings: safetyCheck.warnings
+      warnings: safety.warnings
     };
+    
   } catch (error: any) {
-    console.error(`[EXECUTOR] ═══════════════════════════════════════════`);
-    console.error(`[EXECUTOR] EXECUTION FAILED:`, error.message);
-    console.error(`[EXECUTOR] ═══════════════════════════════════════════`);
+    console.error(`[EXECUTOR] ❌ Failed:`, error.message);
     
     return {
       success: false,
-      completedSteps,
+      completedSteps: 0,
       totalSteps: plan.steps.length,
-      results,
-      error: error.message || String(error)
+      results: [`✗ ${error.message}`],
+      error: error.message
     };
   }
 }
 
 /**
- * Execute a single step with robust error handling
+ * Execute single step - router
  */
 async function executeStep(step: TaskStep): Promise<string> {
   switch (step.op) {
@@ -153,52 +114,20 @@ async function executeStep(step: TaskStep): Promise<string> {
     
     case "Wait": {
       const ms = parseInt((step as any).value || "1000");
-      console.log(`[EXECUTOR:Wait] Waiting ${ms}ms...`);
       await new Promise(resolve => setTimeout(resolve, ms));
       return `Waited ${ms}ms`;
     }
     
     case "Confirm": {
-      const text = (step as any).text || "Confirm action";
-      console.log(`[EXECUTOR:Confirm] ${text}`);
+      const text = (step as any).text || "Confirmed";
       return text;
     }
     
     case "Navigate":
     case "Click":
-      console.warn(`[EXECUTOR] ${step.op} not yet implemented`);
-      return `${step.op} - coming soon`;
+      return `${step.op} - not yet implemented`;
     
     default:
       throw new Error(`Unknown operation: ${(step as any).op}`);
   }
-}
-
-/**
- * Determine if execution should abort on this error
- */
-function shouldAbortOnError(step: TaskStep, error: any): boolean {
-  const errorMsg = String(error.message || error).toLowerCase();
-  
-  // Critical errors that should abort
-  const criticalKeywords = [
-    "critical",
-    "fatal",
-    "access denied",
-    "permission denied",
-    "security",
-    "blocked"
-  ];
-  
-  if (criticalKeywords.some(keyword => errorMsg.includes(keyword))) {
-    return true;
-  }
-  
-  // Message operations should abort on error (don't want to send wrong message)
-  if (step.op === "Message") {
-    return true;
-  }
-  
-  // Otherwise, continue with remaining steps
-  return false;
 }

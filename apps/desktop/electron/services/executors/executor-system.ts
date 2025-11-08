@@ -1,11 +1,13 @@
 /**
- * SystemSetting Executor
- * Controls brightness, volume, and other system settings
- * ROBUST VERSION with multiple fallback methods
+ * SystemSetting Executor - SIMPLIFIED VERSION
+ * Direct methods with simple fallbacks
  */
 
 import { exec } from "child_process";
 import { promisify } from "util";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 const execAsync = promisify(exec);
 
@@ -21,209 +23,70 @@ export interface SystemSettingStep {
 export async function executeSystemSetting(step: SystemSettingStep): Promise<string> {
   const { target, value } = step;
   
-  console.log(`[EXECUTOR:System] Setting ${target} to ${value}`);
+  console.log(`[EXECUTOR:System] ${target} → ${value}`);
   
-  try {
-    // Parse the target (e.g., "display.brightness", "audio.volume")
-    const [category, setting] = target.split(".");
-    
-    if (!category || !setting) {
-      throw new Error(`Invalid target format. Use "category.setting" (e.g., "audio.volume")`);
-    }
-    
-    switch (category.toLowerCase()) {
-      case "display":
-        return await handleDisplaySetting(setting.toLowerCase(), value);
-      
-      case "audio":
-        return await handleAudioSetting(setting.toLowerCase(), value);
-      
-      case "system":
-        return await handleSystemSetting(setting.toLowerCase(), value);
-      
-      default:
-        throw new Error(`Unknown setting category: ${category}. Supported: display, audio, system`);
-    }
-  } catch (error: any) {
-    console.error(`[EXECUTOR:System] Error:`, error.message);
-    throw error;
+  const [category, setting] = target.toLowerCase().split(".");
+  
+  if (!category || !setting) {
+    throw new Error(`Invalid format. Use "audio.volume" or "display.brightness"`);
   }
-}
-
-/**
- * Handle display settings (brightness, etc.)
- */
-async function handleDisplaySetting(setting: string, value: string): Promise<string> {
-  switch (setting) {
-    case "brightness": {
-      const brightness = parseInt(value);
-      if (isNaN(brightness) || brightness < 0 || brightness > 100) {
-        throw new Error("Brightness must be between 0 and 100");
-      }
-      
-      console.log(`[EXECUTOR:System] Attempting to set brightness to ${brightness}%`);
-      
-      // Method 1: Try WMI (works on most laptops)
-      try {
-        const ps1 = `(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, ${brightness})`;
-        await execAsync(`powershell -ExecutionPolicy Bypass -Command "${ps1}"`, {
-          timeout: 5000,
-          windowsHide: true
-        });
-        console.log(`[EXECUTOR:System] Brightness set via WMI`);
-        return `Set brightness to ${brightness}%`;
-      } catch (error1) {
-        console.warn(`[EXECUTOR:System] WMI method failed:`, (error1 as Error).message);
-      }
-      
-      // Method 2: Try CIM (newer Windows API)
-      try {
-        const ps2 = `$brightness = Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness; (Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods).WmiSetBrightness(1, ${brightness})`;
-        await execAsync(`powershell -ExecutionPolicy Bypass -Command "${ps2}"`, {
-          timeout: 5000,
-          windowsHide: true
-        });
-        console.log(`[EXECUTOR:System] Brightness set via CIM`);
-        return `Set brightness to ${brightness}%`;
-      } catch (error2) {
-        console.warn(`[EXECUTOR:System] CIM method failed:`, (error2 as Error).message);
-      }
-      
-      // Method 3: Open brightness settings as fallback
-      try {
-        await execAsync(`cmd /c start ms-settings:display`, { windowsHide: true, timeout: 3000 });
-        return `Opened brightness settings (automatic control not supported on this device)`;
-      } catch (error3) {
-        throw new Error(`Brightness control not supported: ${(error3 as Error).message}`);
-      }
-    }
+  
+  switch (category) {
+    case "audio":
+      return await handleAudio(setting, value);
+    
+    case "display":
+      return await handleDisplay(setting, value);
+    
+    case "system":
+      return await handleSystem(setting, value);
     
     default:
-      throw new Error(`Unknown display setting: ${setting}. Supported: brightness`);
+      throw new Error(`Unknown category: ${category}`);
   }
 }
 
 /**
- * Handle audio settings (volume, mute, etc.)
+ * Handle audio settings - SIMPLE APPROACH
  */
-async function handleAudioSetting(setting: string, value: string): Promise<string> {
+async function handleAudio(setting: string, value: string): Promise<string> {
   switch (setting) {
     case "volume": {
       const volume = parseInt(value);
       if (isNaN(volume) || volume < 0 || volume > 100) {
-        throw new Error("Volume must be between 0 and 100");
+        throw new Error("Volume must be 0-100");
       }
       
-      console.log(`[EXECUTOR:System] Attempting to set volume to ${volume}%`);
+      console.log(`[EXECUTOR:System] Setting volume to ${volume}%`);
       
-      // Method 1: Use simple PowerShell audio object (most reliable)
-      try {
-        // Create a temp PS script file to avoid escaping issues
-        const scriptPath = require('path').join(process.env.TEMP || 'C:\\Windows\\Temp', 'setvol.ps1');
-        const fs = require('fs');
-        
-        const script = `
-Add-Type -TypeDefinition @'
-using System.Runtime.InteropServices;
-[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IAudioEndpointVolume
-{
-    int NotImpl1();
-    int NotImpl2();
-    int GetMasterVolumeLevelScalar(out float pfLevel);
-    int SetMasterVolumeLevelScalar(float fLevel, System.Guid pguidEventContext);
-}
-[Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
-class MMDeviceEnumeratorComObject { }
-[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IMMDeviceEnumerator
-{
-    int NotImpl1();
-    int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice);
-}
-[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IMMDevice
-{
-    int Activate(ref System.Guid id, int clsCtx, int activationParams, out IAudioEndpointVolume aev);
-}
-public class Audio
-{
-    public static void SetVolume(float level)
-    {
-        var enumerator = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator;
-        IMMDevice dev;
-        enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
-        IAudioEndpointVolume aev;
-        var aevGuid = typeof(IAudioEndpointVolume).GUID;
-        dev.Activate(ref aevGuid, 0, 0, out aev);
-        aev.SetMasterVolumeLevelScalar(level, System.Guid.Empty);
-    }
-}
-'@
-[Audio]::SetVolume(${volume / 100.0})
-`;
-        
-        fs.writeFileSync(scriptPath, script, 'utf8');
-        
-        await execAsync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
-          timeout: 10000,
-          windowsHide: true
-        });
-        
-        // Clean up
-        try { fs.unlinkSync(scriptPath); } catch {}
-        
-        console.log(`[EXECUTOR:System] Volume set via Audio API`);
-        return `Set volume to ${volume}%`;
-      } catch (error1) {
-        console.warn(`[EXECUTOR:System] Audio API method failed:`, (error1 as Error).message);
-      }
-      
-      // Method 2: Use VBScript (very reliable fallback)
-      try {
-        const vbsPath = require('path').join(process.env.TEMP || 'C:\\Windows\\Temp', 'setvol.vbs');
-        const fs = require('fs');
-        
-        // VBScript to set volume
-        const vbScript = `
+      // Simple VBScript approach - most reliable
+      const vbsPath = path.join(os.tmpdir(), 'vol.vbs');
+      const vbScript = `
 Set oShell = CreateObject("WScript.Shell")
-' Mute first
 oShell.SendKeys(Chr(&HAD))
-WScript.Sleep 50
-' Set to 0
+WScript.Sleep 100
 For i = 1 To 50
-    oShell.SendKeys(Chr(&HAE))
-WScript.Sleep 10
+  oShell.SendKeys(Chr(&HAE))
 Next
-' Set to target volume
 For i = 1 To ${Math.round(volume / 2)}
-    oShell.SendKeys(Chr(&HAF))
-    WScript.Sleep 10
+  oShell.SendKeys(Chr(&HAF))
+  WScript.Sleep 20
 Next
-`;
-        
+`.trim();
+      
+      try {
         fs.writeFileSync(vbsPath, vbScript, 'utf8');
-        
         await execAsync(`cscript //nologo "${vbsPath}"`, {
-          timeout: 5000,
+          timeout: 8000,
           windowsHide: true
         });
-        
-        // Clean up
+        fs.unlinkSync(vbsPath);
+        return `Volume set to ${volume}%`;
+      } catch (error) {
         try { fs.unlinkSync(vbsPath); } catch {}
-        
-        console.log(`[EXECUTOR:System] Volume set via VBScript`);
-        return `Set volume to ${volume}%`;
-      } catch (error2) {
-        console.warn(`[EXECUTOR:System] VBScript method failed:`, (error2 as Error).message);
-      }
-      
-      // Method 3: Open volume mixer as fallback
-      try {
-        await execAsync(`cmd /c start sndvol.exe`, { windowsHide: true, timeout: 3000 });
-        return `Opened volume mixer (automatic control failed, please adjust manually)`;
-      } catch (error3) {
-        throw new Error(`Volume control not available: ${(error3 as Error).message}`);
+        // Fallback: open volume mixer
+        await execAsync(`cmd /c start sndvol.exe`, { windowsHide: true });
+        return `Opened volume mixer (set to ${volume}% manually)`;
       }
     }
     
@@ -231,70 +94,83 @@ Next
     case "unmute": {
       console.log(`[EXECUTOR:System] Toggling mute`);
       
-      // Method 1: PowerShell SendKeys for mute toggle
-      try {
-        const ps = `(New-Object -ComObject WScript.Shell).SendKeys([char]173)`;
-        await execAsync(`powershell -Command "${ps}"`, { 
-          windowsHide: true, 
-          timeout: 2000 
-        });
-        console.log(`[EXECUTOR:System] Mute toggled via PowerShell`);
-        return `Toggled mute`;
-      } catch (error1) {
-        console.warn(`[EXECUTOR:System] PowerShell mute failed:`, (error1 as Error).message);
-      }
+      // Simple VBScript mute toggle
+      const vbsPath = path.join(os.tmpdir(), 'mute.vbs');
+      const vbScript = `CreateObject("WScript.Shell").SendKeys(Chr(&HAD))`;
       
-      // Method 2: VBScript fallback
       try {
-        const vbsPath = require('path').join(process.env.TEMP || 'C:\\Windows\\Temp', 'mute.vbs');
-        const fs = require('fs');
-        const vbScript = `CreateObject("WScript.Shell").SendKeys(Chr(&HAD))`;
         fs.writeFileSync(vbsPath, vbScript, 'utf8');
-        
         await execAsync(`cscript //nologo "${vbsPath}"`, {
           timeout: 2000,
           windowsHide: true
         });
-        
-        try { fs.unlinkSync(vbsPath); } catch {}
-        
-        console.log(`[EXECUTOR:System] Mute toggled via VBScript`);
+        fs.unlinkSync(vbsPath);
         return `Toggled mute`;
-      } catch (error2) {
-        throw new Error(`Mute control failed: ${(error2 as Error).message}`);
+      } catch (error) {
+        try { fs.unlinkSync(vbsPath); } catch {}
+        throw new Error(`Mute failed: ${(error as Error).message}`);
       }
     }
     
     default:
-      throw new Error(`Unknown audio setting: ${setting}. Supported: volume, mute, unmute`);
+      throw new Error(`Unknown audio setting: ${setting}`);
   }
 }
 
 /**
- * Handle system settings (power, network, etc.)
+ * Handle display settings - SIMPLE APPROACH
  */
-async function handleSystemSetting(setting: string, value: string): Promise<string> {
+async function handleDisplay(setting: string, value: string): Promise<string> {
   switch (setting) {
-    case "nightlight": {
-      const enabled = value.toLowerCase() === "true" || value === "1" || value.toLowerCase() === "on";
+    case "brightness": {
+      const brightness = parseInt(value);
+      if (isNaN(brightness) || brightness < 0 || brightness > 100) {
+        throw new Error("Brightness must be 0-100");
+      }
       
-      // Just open the settings page - registry method is unreliable
-      await execAsync(`cmd /c start ms-settings:nightlight`, { windowsHide: true, timeout: 3000 });
-      return `Opened Night Light settings`;
-    }
-    
-    case "wifi":
-    case "network": {
-      await execAsync(`cmd /c start ms-settings:network`, { windowsHide: true, timeout: 3000 });
-      return `Opened network settings`;
-    }
-    
-    case "bluetooth": {
-      await execAsync(`cmd /c start ms-settings:bluetooth`, { windowsHide: true, timeout: 3000 });
-      return `Opened Bluetooth settings`;
+      console.log(`[EXECUTOR:System] Setting brightness to ${brightness}%`);
+      
+      // Try WMI method (works on most laptops)
+      try {
+        const ps = `(Get-WmiObject -Namespace root/WMI -Class WmiMonitorBrightnessMethods).WmiSetBrightness(1, ${brightness})`;
+        await execAsync(`powershell -Command "${ps}"`, {
+          timeout: 5000,
+          windowsHide: true
+        });
+        return `Brightness set to ${brightness}%`;
+      } catch (error) {
+        // Fallback: open display settings
+        await execAsync(`cmd /c start ms-settings:display`, { windowsHide: true });
+        return `Opened display settings (set brightness to ${brightness}% manually)`;
+      }
     }
     
     default:
-      throw new Error(`Unknown system setting: ${setting}. Supported: nightlight, wifi, network, bluetooth`);
+      throw new Error(`Unknown display setting: ${setting}`);
   }
+}
+
+/**
+ * Handle system settings - SIMPLE APPROACH
+ */
+async function handleSystem(setting: string, value: string): Promise<string> {
+  // For most system settings, just open the relevant settings page
+  const settingsMap: Record<string, string> = {
+    "nightlight": "ms-settings:nightlight",
+    "wifi": "ms-settings:network-wifi",
+    "network": "ms-settings:network",
+    "bluetooth": "ms-settings:bluetooth",
+    "notifications": "ms-settings:notifications",
+    "focusassist": "ms-settings:quiethours",
+    "power": "ms-settings:powersleep",
+    "battery": "ms-settings:batterysaver"
+  };
+  
+  const settingsUrl = settingsMap[setting];
+  if (settingsUrl) {
+    await execAsync(`cmd /c start ${settingsUrl}`, { windowsHide: true });
+    return `Opened ${setting} settings`;
+  }
+  
+  throw new Error(`Unknown system setting: ${setting}`);
 }
