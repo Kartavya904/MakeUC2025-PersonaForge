@@ -54,12 +54,9 @@ export default function LandingPage() {
       <header className="lp-nav">
         <div className="lp-nav-left">
           <div className="lp-logo">
-            <span className="lp-glyph">◆</span>
             <span className="lp-mark">PersonaForge</span>
           </div>
           <nav className="lp-links">
-            <a className="lp-link" onClick={goSettings}>Settings</a>
-            <a className="lp-link" onClick={onPreview}>Preview voice</a>
           </nav>
         </div>
         <div className="lp-nav-right">

@@ -2,7 +2,7 @@
 // ESM main process: dotenv, settings store, voices list, TTS preview, robust tray handling.
 
 import * as dotenv from 'dotenv';
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, type NativeImage } from 'electron';
 import Store from 'electron-store';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -54,7 +54,7 @@ function applyLoginItem(settings: AppSettings['general']) {
   });
 }
 
-function resolveTrayIcon(): nativeImage | null {
+function resolveTrayIcon(): NativeImage | null {
   // Try dist-electron/icon.ico (Windows) or iconTemplate.png (macOS), fallback to null.
   const candidates = process.platform === 'win32'
     ? [path.join(__dirname, 'icon.ico')]

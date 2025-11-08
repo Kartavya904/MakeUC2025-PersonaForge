@@ -121,7 +121,6 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
       <div className="sp-container">
         <header className="sp-header">
           <button className="sp-brand" onClick={onBack}>
-            <div className="sp-glyph">◆</div>
             <div className="sp-title">PersonaForge</div>
           </button>
 
@@ -282,12 +281,16 @@ const STYLES = `
   }
 }
 
-/* Removed outer padding: full-bleed background */
+/* Full-bleed background - absolutely no white borders or padding */
 .sp-root{
-  position:relative; min-height:80; color:var(--sp-fg);
+  position:fixed; top:0; left:0; right:0; bottom:0;
+  width:100vw; height:100vh; 
+  margin:0; padding:0; 
+  color:var(--sp-fg);
   background: radial-gradient(60% 60% at 10% 10%, rgba(124,157,255, .12), transparent 60%),
               radial-gradient(60% 60% at 90% 20%, rgba(57,208,255, .12), transparent 60%),
               linear-gradient(120deg, var(--sp-bg) 10%, var(--sp-bg2) 40%, var(--sp-bg) 90%);
+  overflow-y:auto;
 }
 
 /* Internal container handles spacing */
@@ -300,6 +303,7 @@ const STYLES = `
   display:flex; align-items:center; gap:10px; border:none; background:transparent; color:inherit; cursor:pointer;
 }
 .sp-brand:hover .sp-title{ text-decoration:underline; }
+.sp-icon{ width:30px; height:30px; object-fit:contain; }
 .sp-glyph{ width:30px; height:30px; border-radius:8px; display:grid; place-items:center;
   background:linear-gradient(135deg, var(--sp-primary), var(--sp-accent)); color:#0b0f1a; font-weight:900; }
 .sp-title{ font-weight:800; letter-spacing:.2px; }
