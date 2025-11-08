@@ -1,0 +1,23 @@
+SCHEDULE_24H.txt — 24-Hour Build Plan (PersonaForge)
+
+Hour 0–1  : Repo scaffold (Electron app + packages), init README, .env.example, install deps.
+Hour 1–2  : Wire ElevenLabs TTS test script (“Hello from VoxOS”) to confirm keys & audio output.
+Hour 2–4  : ASR path A: push-to-talk hotkey + Whisper.cpp integration (or stub); VAD & transcript pipe.
+Hour 4–6  : Gemini planner prompt + validator; parse JSON; show raw steps in a debug pane.
+Hour 6–8  : Router rules (POWERSHELL/UIA/HOTKEY/API) + slot resolver (percent/app/contact). Unit tests for rules.
+Hour 8–10 : Executor: POWERSHELL (Start-Process, ms-settings:, Brightness.ps1). Complete brightness E2E.
+Hour 10–12: Executor: UIA/SendInput. Implement “Open Settings → search → Enter”. E2E #2 passes.
+Hour 12–13: Consent toast & PIN gate for risky ops; Kill switch. Wire audit.db (actions, runs).
+Hour 13–15: Slack path: UIA first; API optional if token present. E2E #3 passes.
+Hour 15–16: ElevenLabs reply hooked to outcomes; consistent phrasing; handle failures (“Couldn’t find Slack”).
+Hour 16–18: Polish: catalogs build (InstalledApps.json), error toasts, retry once on failures.
+Hour 18–20: Latency logging; show median/p95 on a tiny stats screen. Fix paper-cuts.
+Hour 20–21: Record 2‑min demo script (three tasks + consent + audit). Capture clean audio.
+Hour 21–22: Devpost draft (Concept, Technical Execution, Demo, Presentation). Screenshots/GIFs.
+Hour 22–23: README final pass; test on another Windows machine if possible.
+Hour 23–24: Buffer for surprises. Freeze main. Ship.
+
+Smaller optional swaps if blocked
+- If brightness via WMI fails on external monitor, switch demo to volume or night light via powershell.
+- If Whisper integration is slow, use Gemini Realtime for the demo and keep Whisper stubbed.
+- If Slack UIA is flaky, default to API with test token.

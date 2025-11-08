@@ -1,0 +1,152 @@
+PROJECT_PLAN.txt — PersonaForge (Consent‑First Voice Agent for Windows; Where voice meets AI)
+====================================================================
+
+Goal
+----
+Ship a Windows desktop voice agent with this pipeline:
+Wake → ASR → Gemini (plan JSON) → Router (your AI) → Executors → ElevenLabs (reply) → Audit log.
+MVP must complete three tasks reliably: change brightness, open/settings navigation + typing, Slack DM.
+
+User Stories
+------------
+1) As a user, I say “Jarvis, set brightness to 30%” → screen dims; voice confirms.
+2) “Jarvis, open Settings, type ‘focus assist’, press Enter” → Settings opens + navigates; voice confirms.
+3) “Jarvis, open Slack and DM Didi ‘Hi!’ and send” → Slack focuses; message sent; voice confirms.
+
+System Architecture
+-------------------
+• Desktop App (Electron + Node) for UI + hotkeys + overlay (consent chip, toasts).
+• ASR: Whisper local (tiny/base) OR Gemini Realtime if network is stable (toggle).
+• Planner: Gemini (text API) returns strict JSON plan (schema below).
+• Router (your AI): picks handler per step (POWERSHELL, UIA, HOTKEY, API) and resolves slots (apps, contacts, percents).
+• Executors: concrete implementations per handler.
+• TTS: ElevenLabs streaming (reactive voice).
+• Audit: SQLite (local), optional metrics to file for Vultr dashboard later.
+
+Tech Stack
+----------
+Frontend/App: Electron (Node 22, TS), Tailwind + small toast UI; Windows-only.
+ASR: Whisper.cpp (local) OR Gemini Realtime (fallback).
+Planner: Gemini 2.x (JSON mode); tool-calling OFF (we parse JSON).
+Router AI: scikit-learn (logreg) + RapidFuzz + optional MiniLM embeddings (sentence-transformers). Packaged via pyodide or called through a tiny Python bridge (FastAPI local service) for simplicity.
+Executors: 
+  - PowerShell (Start-Process, ms-settings: URIs, helper ps1 for brightness via WMI/ACPI)
+  - Windows UI Automation (uiautomation / win32 APIs) + SendInput for keys
+  - Slack Web API (optional: chat.postMessage) or UIA path if token absent
+TTS: ElevenLabs Node SDK (streaming).
+Data: SQLite (better-sqlite3), JSON logs, catalogs (apps/contacts) as JSON.
+Security: PIN prompt for risky scopes, local-only keys in .env, audit chain-hash.
+
+Planner JSON Schema
+-------------------
+{
+  "task": "Change brightness to 50%",
+  "risk": "low|medium|high",
+  "steps": [
+    {"op":"SystemSetting","target":"display.brightness","value":"50%"},
+    {"op":"Confirm","text":"Set brightness to 50%?"}
+  ]
+}
+Allowed ops: OpenApp, Navigate, Type, Click, Shortcut, SystemSetting, Message, Confirm, Wait.
+
+Planner Prompt (Gemini)
+-----------------------
+SYSTEM: You are a Windows Task Planner. Return ONLY valid JSON matching the schema. Do not include explanations.
+USER: Instruction: "<ASR transcript here>"
+Context:
+- Installed apps: <list>
+- Known contacts: <list>
+- Examples:
+  - "set brightness to 30%" → [{"op":"SystemSetting","target":"display.brightness","value":"30%"}]
+  - "open settings and search for focus assist" → [
+     {"op":"OpenApp","app":"ms-settings:"},
+     {"op":"Type","text":"focus assist"},
+     {"op":"Shortcut","keys":["Enter"]}
+    ]
+Return: { "task": "...", "risk":"...", "steps":[ ... ] }
+
+Router (Your AI)
+----------------
+Purpose: For each step, choose handler + resolve slots to executable parameters.
+Inputs: step JSON, catalogs (apps, contacts), heuristic features.
+Outputs: Action object {handler, name, args, needsConsent?}.
+Implementation plan:
+1) Rules-first baseline:
+   - SystemSetting.display.brightness → POWERSHELL (helper Brightness.ps1 set 0–100)
+   - OpenApp:
+       * If "ms-settings:" → HOTKEY Win+I or start-process "ms-settings:"
+       * Else: Start-Process with alias map {"slack":"slack", "notepad":"notepad", ...}
+   - Message (Slack):
+       * If SLACK_BOT_TOKEN set → API(chat.postMessage)
+       * Else → UIA (find sidebar search, type name, Enter, type text, Enter)
+   - Type/Shortcut/Click → UIA / SendInput
+2) Minimal classifier (upgrade later):
+   - Train logreg on `{step_text → handler}` with 80–100 hand-labeled samples.
+   - Persist with joblib. Use confidence threshold to fall back to rule.
+
+Slot Resolution
+---------------
+• Apps: build InstalledApps.json via a one-time scan (registry + Start Menu) with aliases.
+• Contacts: Slack users via API or a demo Contacts.json.
+• Percents: regex `(\d{1,3})%` clamp 0–100.
+• Targets: normalize e.g., “brightness” → “display.brightness”.
+
+Executors
+---------
+POWERSHELL:
+- Start-Process "<exe or alias>"
+- Brightness: Brightness.ps1 (uses WMI/ACPI for integrated panels). If external monitor, return NotSupported.
+UIA:
+- Bring window to foreground (FindWindowEx/SetForeground).
+- Find element by Name/AutomationId; fallback to Tab/Shift+Tab traversal; SendInput for keys.
+HOTKEY:
+- Emit system hotkeys: Win+I, Alt+Tab, Ctrl+L, etc.
+API (Slack):
+- chat.postMessage(channelId, text) after resolving display name to ID.
+
+Consent & Risk
+--------------
+• Risk tagging from planner. Any Message/Delete/Upload or external network call → require consent toast (Yes/No) or PIN if sensitive.
+• Kill switch: Ctrl+Shift+F12 aborts flow.
+• Audit: chain-hash each action {prev_hash, step, handler, args_hash, result}.
+
+ASR
+---
+• Option A: Whisper.cpp (tiny/base.en) for offline; VAD to segment; 16kHz mono.
+• Option B: Gemini Realtime streaming; lower latency; requires network. Runtime toggle allowed.
+
+TTS (ElevenLabs)
+----------------
+• Streaming response after final step or after confirm. Voice is your own (consented).
+
+Env & Secrets
+-------------
+.env keys: GEMINI_API_KEY, ELEVENLABS_API_KEY, optional SLACK_BOT_TOKEN.
+Never commit .env; provide .env.example.
+
+Testing
+-------
+• Unit: router rules, slot parsing, executors no-ops (dry run).
+• Integration: three scripted tasks with golden logs; assert success + p95 latency.
+• Manual: dark theme, non-English UI labels smoke test (vision fallback later).
+
+Telemetry (local first)
+-----------------------
+• SQLite tables: actions, runs, failures with timestamps, latencies.
+• Optional Vultr dashboard later (out of MVP).
+
+Risks & Fallbacks
+-----------------
+• Brightness may not apply to external monitors → show NotSupported.
+• Slack UI changes → fallback to API if token present.
+• ASR ambient noise → add push-to-talk hotkey fallback.
+
+Milestones
+----------
+M0 (scaffold), M1 (E2E brightness), M2 (Settings+type), M3 (Slack DM), M4 (consent+audit polish), M5 (video/demo).
+
+Deliverables
+------------
+• Apps run locally on Windows 10/11.
+• 2‑min demo video.
+• Devpost write-up mapped to judging criteria.
