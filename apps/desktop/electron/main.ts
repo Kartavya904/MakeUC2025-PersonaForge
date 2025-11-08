@@ -2,7 +2,7 @@
 // ESM main process: dotenv, settings store, voices list, TTS preview, robust tray handling.
 
 import * as dotenv from 'dotenv';
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, type NativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, type NativeImage } from 'electron';
 import Store from 'electron-store';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -46,6 +46,7 @@ const store = new Store<AppSettings>({
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let overlayWin: BrowserWindow | null = null;
 
 function applyLoginItem(settings: AppSettings['general']) {
   app.setLoginItemSettings({
@@ -70,7 +71,10 @@ function resolveTrayIcon(): NativeImage | null {
 }
 
 function setupTray() {
-  if (tray) return;
+  if (tray) {
+    updateTrayMenu();
+    return;
+  }
   try {
     const iconImg = resolveTrayIcon();
     if (!iconImg) {
@@ -78,17 +82,76 @@ function setupTray() {
       return;
     }
     tray = new Tray(iconImg);
-    const ctx = Menu.buildFromTemplate([
-      { label: 'Open PersonaForge', click: () => win?.show() },
-      { type: 'separator' },
-      { label: 'Exit', click: () => app.quit() }
-    ]);
+    updateTrayMenu();
     tray.setToolTip('PersonaForge — Voice Assistant');
-    tray.setContextMenu(ctx);
     tray.on('double-click', () => win?.show());
   } catch (err) {
     console.error('[tray] failed to create tray:', err);
   }
+}
+
+async function stopAssistantFromTray() {
+  if (!assistantRunning) return;
+  assistantRunning = false;
+  
+  // Close overlay window
+  if (overlayWin) {
+    overlayWin.close();
+    overlayWin = null;
+  }
+  
+  // Show main window
+  if (win) {
+    win.show();
+    win.restore();
+  }
+  
+  updateTrayMenu();
+  console.log('[assistant] stopped from tray');
+}
+
+async function startAssistantFromTray() {
+  if (assistantRunning) return;
+  const { behavior } = store.store;
+  if (!behavior.runAssistant) {
+    console.warn('[assistant] cannot start: disabled in settings');
+    return;
+  }
+
+  assistantRunning = true;
+  
+  // Minimize main window to tray
+  if (win) {
+    win.minimize();
+    win.hide();
+  }
+  
+  // Create overlay window
+  createOverlayWindow();
+  updateTrayMenu();
+  
+  console.log('[assistant] started from tray');
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const ctx = Menu.buildFromTemplate([
+    { label: 'Open PersonaForge', click: () => win?.show() },
+    { type: 'separator' },
+    { 
+      label: assistantRunning ? 'Stop Assistant' : 'Start Assistant',
+      click: async () => {
+        if (assistantRunning) {
+          await stopAssistantFromTray();
+        } else {
+          await startAssistantFromTray();
+        }
+      }
+    },
+    { type: 'separator' },
+    { label: 'Exit', click: () => app.quit() }
+  ]);
+  tray.setContextMenu(ctx);
 }
 
 function createWindow() {
@@ -211,18 +274,211 @@ ipcMain.handle('voices:refresh', async () => {
   return cachedVoices;
 });
 
-// ----- Assistant lifecycle (stubs) -----
+// ----- Assistant lifecycle -----
 let assistantRunning = false;
+
+function createOverlayWindow() {
+  if (overlayWin) return overlayWin;
+
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.workAreaSize;
+
+  overlayWin = new BrowserWindow({
+    width: 80,
+    height: 80,
+    x: width - 100, // Position in top-right corner
+    y: 20,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    movable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  // Load overlay HTML
+  if (process.env.RENDERER_URL) {
+    overlayWin.loadURL(`${process.env.RENDERER_URL}/overlay.html`);
+  } else {
+    overlayWin.loadFile(path.join(__dirname, '../renderer-dist/overlay.html'));
+  }
+
+  // Make window draggable
+  overlayWin.setIgnoreMouseEvents(false);
+
+  overlayWin.on('closed', () => {
+    overlayWin = null;
+  });
+
+  return overlayWin;
+}
+
 ipcMain.handle('assistant:start', async () => {
   const { behavior } = store.store;
   if (!behavior.runAssistant) return { ok: false, reason: 'Disabled in settings' };
+  
+  if (assistantRunning) {
+    return { ok: true }; // Already running
+  }
+
   assistantRunning = true;
-  console.log('[assistant] started');
+  
+  // Minimize main window to tray
+  if (win) {
+    win.minimize();
+    win.hide();
+  }
+  
+  // Ensure tray is set up
+  setupTray();
+  updateTrayMenu();
+  
+  // Create overlay window
+  createOverlayWindow();
+  
+  console.log('[assistant] started - minimized to tray, overlay created');
   return { ok: true };
 });
+
 ipcMain.handle('assistant:stop', async () => {
+  if (!assistantRunning) {
+    return { ok: true };
+  }
+
   assistantRunning = false;
+  
+  // Close overlay window
+  if (overlayWin) {
+    overlayWin.close();
+    overlayWin = null;
+  }
+  
+  // Show main window
+  if (win) {
+    win.show();
+    win.restore();
+  }
+  
+  // Update tray menu
+  updateTrayMenu();
+  
   console.log('[assistant] stopped');
+  return { ok: true };
+});
+
+// IPC handlers for overlay window
+ipcMain.handle('overlay:stt:start', async () => {
+  if (!assistantRunning) return { ok: false, reason: 'Assistant not running' };
+  // Import and use STT service
+  const { sttStart } = await import('./services/stt-eleven.js');
+  sttStart();
+  return { ok: true };
+});
+
+ipcMain.handle('overlay:stt:push', async (_e, chunk: ArrayBuffer) => {
+  if (!assistantRunning) return { ok: false };
+  const { sttPush } = await import('./services/stt-eleven.js');
+  sttPush(Buffer.from(chunk));
+  return { ok: true };
+});
+
+ipcMain.handle('overlay:stt:stop', async () => {
+  if (!assistantRunning) return { ok: false, reason: 'Assistant not running' };
+  const { sttStopAndTranscribe } = await import('./services/stt-eleven.js');
+  try {
+    const text = await sttStopAndTranscribe();
+    return { ok: true, text };
+  } catch (err: any) {
+    return { ok: false, reason: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('overlay:tts:speak', async (_e, text: string) => {
+  if (!assistantRunning) return { ok: false, reason: 'Assistant not running' };
+  try {
+    const s = store.store;
+    const apiKey = getElevenKey();
+    if (!apiKey) return { ok: false, reason: 'Missing ELEVEN* API key' };
+    if (!s.voice.voiceId) return { ok: false, reason: 'No voice selected' };
+
+    const ratePct = Math.round((s.voice.params.speakingRate || 1.0) * 100);
+    const pitchSt = Math.round(s.voice.params.pitch || 0);
+    const ssml = `<speak><prosody rate="${ratePct}%" pitch="${pitchSt}st">${text}</prosody></speak>`;
+
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${s.voice.voiceId}`;
+    const body = {
+      text: ssml,
+      model_id: 'eleven_multilingual_v2',
+      voice_settings: {
+        stability: s.voice.params.stability,
+        similarity_boost: s.voice.params.similarityBoost,
+        style: s.voice.params.style,
+        use_speaker_boost: s.voice.params.useSpeakerBoost
+      }
+    };
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text();
+      return { ok: false, reason: `TTS HTTP ${resp.status}`, detail: txt.slice(0,500) };
+    }
+    const ab = await resp.arrayBuffer();
+    const b64 = Buffer.from(ab).toString('base64');
+    return { ok: true, mime: 'audio/mpeg', audioBase64: b64 };
+  } catch (err: any) {
+    return { ok: false, reason: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('overlay:expand', async () => {
+  if (!overlayWin) return { ok: false };
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.workAreaSize;
+  const [x, y] = overlayWin.getPosition();
+  const [w, h] = overlayWin.getSize();
+  
+  // Center the expanded window, but keep it near the original position
+  const newWidth = 400;
+  const newHeight = 600;
+  const newX = Math.max(0, Math.min(x - (newWidth - w) / 2, width - newWidth));
+  const newY = Math.max(0, Math.min(y - (newHeight - h) / 2, height - newHeight));
+  
+  overlayWin.setSize(newWidth, newHeight);
+  overlayWin.setPosition(Math.round(newX), Math.round(newY));
+  overlayWin.setResizable(true);
+  return { ok: true };
+});
+
+ipcMain.handle('overlay:collapse', async () => {
+  if (!overlayWin) return { ok: false };
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width } = primaryDisplay.workAreaSize;
+  const [x, y] = overlayWin.getPosition();
+  const [w] = overlayWin.getSize();
+  
+  // Keep position near top-right when collapsing
+  const newWidth = 80;
+  const newHeight = 80;
+  const newX = Math.min(x + (w - newWidth) / 2, width - newWidth - 20);
+  const newY = Math.max(20, y);
+  
+  overlayWin.setSize(newWidth, newHeight);
+  overlayWin.setPosition(Math.round(newX), Math.round(newY));
+  overlayWin.setResizable(false);
   return { ok: true };
 });
 
@@ -286,7 +542,18 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    if (!store.get('general').runMinimized) app.quit();
+    if (!store.get('general').runMinimized && !assistantRunning) {
+      app.quit();
+    }
+  }
+});
+
+app.on('before-quit', () => {
+  // Clean up overlay window
+  if (overlayWin) {
+    overlayWin.removeAllListeners('close');
+    overlayWin.close();
+    overlayWin = null;
   }
 });
 
