@@ -9,16 +9,19 @@ declare global {
       audioChunk: (ab: ArrayBuffer) => void;
       nlpAsk: (text: string) => Promise<string>;
       ttsSpeak: (text: string) => Promise<void>;
+      executePlan: (plan: any) => Promise<any>;
       on: (channel: string, cb: (...args: any[]) => void) => () => void;
     };
   }
 }
 
 export default function App() {
-  const [appStatus, setAppStatus] = useState<"idle" | "recording" | "processing">("idle");
+  const [appStatus, setAppStatus] = useState<"idle" | "recording" | "processing" | "executing">("idle");
   const [transcript, setTranscript] = useState("");
   const [partial, setPartial] = useState("");
   const [reply, setReply] = useState("");
+  const [currentPlan, setCurrentPlan] = useState<any>(null);
+  const [executionResults, setExecutionResults] = useState<string[]>([]);
 
   const audioChunksRef = useRef<Uint8Array[]>([]);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -28,7 +31,9 @@ export default function App() {
   useEffect(() => {
     const offStatus = window.api.on("app:status", (status: any) => {
       const value = typeof status === "string" ? status : status?.state;
-      if (value === "recording" || value === "processing" || value === "idle") setAppStatus(value);
+      if (value === "recording" || value === "processing" || value === "idle" || value === "executing") {
+        setAppStatus(value);
+      }
     });
     const offPartial = window.api.on("stt:partial", (txt: string) => setPartial(txt));
     const offFinal = window.api.on("stt:final", (txt: string) => { setPartial(""); setTranscript(txt); });
@@ -45,7 +50,18 @@ export default function App() {
       const audio = new Audio(url);
       audio.play().finally(() => URL.revokeObjectURL(url));
     });
-    return () => { offStatus?.(); offPartial?.(); offFinal?.(); offErr?.(); offTtsChunk?.(); offTtsDone?.(); };
+    const offPlanReady = window.api.on("plan:ready", (plan: any) => {
+      console.log("[App] Received plan:", plan);
+      setCurrentPlan(plan);
+    });
+    const offExecComplete = window.api.on("execution:complete", (result: any) => {
+      console.log("[App] Execution complete:", result);
+      setExecutionResults(result.results || []);
+    });
+    return () => { 
+      offStatus?.(); offPartial?.(); offFinal?.(); offErr?.(); 
+      offTtsChunk?.(); offTtsDone?.(); offPlanReady?.(); offExecComplete?.(); 
+    };
   }, []);
 
   async function startMic() {
@@ -86,8 +102,22 @@ export default function App() {
 
   const onRecord = async () => { await startMic(); };
   const onStop = async () => { await window.api.stopRecording(); stopMic(); };
-  const onSend = async () => { const r = await window.api.nlpAsk(transcript || partial || "(empty)"); setReply(r); };
+  const onSend = async () => { 
+    setExecutionResults([]);
+    setCurrentPlan(null);
+    const r = await window.api.nlpAsk(transcript || partial || "(empty)"); 
+    setReply(r); 
+  };
   const onSpeak = async () => { if (reply) await window.api.ttsSpeak(reply); };
+  const onExecute = async () => {
+    if (!currentPlan) return;
+    setExecutionResults([]);
+    try {
+      await window.api.executePlan(currentPlan);
+    } catch (err: any) {
+      setExecutionResults([`Error: ${err.message}`]);
+    }
+  };
 
   const disabled = appStatus !== "idle";
 
@@ -105,23 +135,37 @@ export default function App() {
           <button onClick={onRecord} disabled={appStatus !== "idle"}>Record</button>
           <button onClick={onStop} disabled={appStatus === "idle"}>Stop</button>
           <button onClick={onSend} disabled={disabled}>Send</button>
+          <button onClick={onExecute} disabled={!currentPlan || appStatus === "executing"}>
+            {appStatus === "executing" ? "Executing..." : "Execute"}
+          </button>
           <button onClick={onSpeak} disabled={!reply}>Speak</button>
         </div>
       </header>
-      <main style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, padding: 12 }}>
-        <section style={{ border: "1px solid #1f2937", borderRadius: 8, padding: 12 }}>
+      <main style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, padding: 12, overflow: "hidden" }}>
+        <section style={{ border: "1px solid #1f2937", borderRadius: 8, padding: 12, overflow: "auto" }}>
           <h3>Transcript</h3>
           <div style={{ whiteSpace: "pre-wrap", opacity: 0.95 }}>{transcript}</div>
           <div style={{ whiteSpace: "pre-wrap", color: "#9ca3af", marginTop: 8 }}>{partial}</div>
         </section>
-        <section style={{ border: "1px solid #1f2937", borderRadius: 8, padding: 12 }}>
-          <h3>LLM Reply</h3>
-          <div style={{ whiteSpace: "pre-wrap" }}>{reply}</div>
+        <section style={{ border: "1px solid #1f2937", borderRadius: 8, padding: 12, overflow: "auto" }}>
+          <h3>Action Plan (JSON)</h3>
+          <div style={{ whiteSpace: "pre-wrap", fontSize: 12, fontFamily: "monospace" }}>{reply}</div>
         </section>
-        <section style={{ border: "1px solid #1f2937", borderRadius: 8, padding: 12 }}>
-          <h3>Notes</h3>
-          <p>• Ctrl+Space PTT can be added in main later.</p>
-          <p>• Models/voices set via .env.</p>
+        <section style={{ border: "1px solid #1f2937", borderRadius: 8, padding: 12, overflow: "auto" }}>
+          <h3>Execution Results</h3>
+          {executionResults.length > 0 ? (
+            <div style={{ fontSize: 13, fontFamily: "monospace" }}>
+              {executionResults.map((res, i) => (
+                <div key={i} style={{ marginBottom: 8, color: res.startsWith("✓") ? "#10b981" : "#ef4444" }}>
+                  {res}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ opacity: 0.6, fontSize: 13 }}>
+              Click <strong>Execute</strong> after receiving a plan to run the tasks.
+            </p>
+          )}
         </section>
       </main>
     </div>

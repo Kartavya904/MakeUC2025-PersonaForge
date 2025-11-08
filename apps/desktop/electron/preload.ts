@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("api", {
   audioChunk: (ab: ArrayBuffer): void => ipcRenderer.send("stt:audio-chunk", Buffer.from(ab)),
   nlpAsk: (text: string): Promise<string> => ipcRenderer.invoke("nlp:ask", text),
   ttsSpeak: (text: string): Promise<void> => ipcRenderer.invoke("tts:speak", text),
+  executePlan: (plan: any): Promise<any> => ipcRenderer.invoke("plan:execute", plan),
   on: (channel: string, cb: (...args: any[]) => void): Unsub => {
     const wrapped = (_e: any, ...args: any[]) => cb(...args);
     ipcRenderer.on(channel, wrapped);

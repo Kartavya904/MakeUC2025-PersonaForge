@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import { sttStart, sttPush, sttStopAndTranscribe } from "./services/stt-eleven";
 import { ttsStream } from "./services/tts-eleven";
 import { createGeminiService, GeminiPlannerService } from "./services/nlp-gemini";
+import { executePlan } from "./services/executors/executor-main";
 
 function loadEnv() {
   // candidates: when running from dist-electron/main.cjs
@@ -167,8 +168,7 @@ ipcMain.handle("nlp:ask", async (_e, prompt: string) => {
     mainWindow?.webContents.send("app:status", "idle");
     console.log("[main] Generated action plan:", plan);
     
-    // Return the JSON plan as a string for display AND as data
-    // Send the actual plan object to renderer for execution
+    // Send the actual plan object to renderer
     mainWindow?.webContents.send("plan:ready", plan);
     
     // Return formatted JSON string for display in Reply panel
@@ -185,5 +185,26 @@ ipcMain.handle("nlp:ask", async (_e, prompt: string) => {
       steps: []
     };
     return JSON.stringify(errorPlan, null, 2);
+  }
+});
+
+/* ============== Plan Execution ============== */
+
+ipcMain.handle("plan:execute", async (_e, plan: any) => {
+  console.log("[main] Executing plan:", plan.task);
+  mainWindow?.webContents.send("app:status", "executing");
+  
+  try {
+    const result = await executePlan(plan);
+    
+    mainWindow?.webContents.send("app:status", "idle");
+    mainWindow?.webContents.send("execution:complete", result);
+    
+    console.log("[main] Execution complete:", result);
+    return result;
+  } catch (err) {
+    mainWindow?.webContents.send("app:status", "idle");
+    console.error("[main] Execution error:", err);
+    throw err;
   }
 });
