@@ -95,9 +95,17 @@ function createWindow() {
   const general = store.get('general');
   const show = !general.runMinimized;
 
+  const iconPath =
+    process.platform === 'win32'
+      ? path.join(__dirname, 'icon.ico') // we copy this to dist-electron/
+      : process.platform === 'darwin'
+      ? path.join(__dirname, 'icon.icns') // optional, for mac dev
+      : path.join(__dirname, 'icon.png'); // optional, for linux dev
+
   win = new BrowserWindow({
     width: 1140,
     height: 760,
+    icon: iconPath,
     show,
     autoHideMenuBar: true,
     webPreferences: {
