@@ -9,6 +9,7 @@ dist-*/
 **/dist-*/
 apps/**/dist-renderer/
 apps/**/dist-electron/
+apps/**/*-dist/
 
 # Caches
 .npm/

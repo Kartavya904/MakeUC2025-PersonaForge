@@ -1,42 +1,37 @@
 {
   "name": "desktop",
   "version": "1.0.0",
-  "main": "dist-electron/main.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev:renderer": "vite",
-    "typecheck": "tsc --noEmit",
-    "dev:build": "esbuild electron/main.ts electron/preload.ts --platform=node --format=esm --outdir=dist-electron --watch",
-    "dev:electron": "wait-on dist-electron/main.js dist-electron/preload.js && cross-env RENDERER_URL=http://localhost:5173 NODE_ENV=development nodemon --watch dist-electron -e js --exec electron dist-electron/main.js",
-    "build:electron": "esbuild electron/main.ts --platform=node --format=esm --outfile=dist-electron/main.js",
-    "build:preload": "esbuild electron/preload.ts --platform=node --format=esm --outfile=dist-electron/preload.js",
-    "build": "npm run build:electron && npm run build:preload && vite build",
-    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:build\" \"npm:dev:electron\"",
-    "start": "electron dist-electron/main.js"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "main": "dist-electron/main.cjs",
   "type": "module",
+  "scripts": {
+    "dev:renderer": "vite",
+    "dev:build": "esbuild electron/main.ts electron/preload.ts --platform=node --format=cjs --outdir=dist-electron --watch",
+    "dev:electron": "wait-on dist-electron/main.cjs dist-electron/preload.js && cross-env RENDERER_URL=http://localhost:5173 NODE_ENV=development nodemon --watch dist-electron -e cjs,js --exec electron dist-electron/main.cjs",
+    "build:preload": "esbuild electron/preload.ts --platform=node --format=cjs --outfile=dist-electron/preload.js",
+    "build:electron": "esbuild electron/main.ts --platform=node --format=cjs --bundle --external:electron --target=node20 --outfile=dist-electron/main.cjs",
+    "build:renderer": "vite build",
+    "build": "npm run build:electron && npm run build:preload && npm run build:renderer",
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:build\" \"npm:dev:electron\"",
+    "start": "electron dist-electron/main.cjs"
+  },
   "dependencies": {
-    "electron": "^39.1.1",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "@elevenlabs/elevenlabs-js": "^2.22.0",
+    "dotenv": "^17.2.3",
+    "electron": "^29.4.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@types/node": "^24.10.0",
-    "@types/react": "^19.2.2",
-    "@types/react-dom": "^19.2.2",
-    "@vitejs/plugin-react": "^5.1.0",
-    "concurrently": "^9.2.1",
-    "cross-env": "^10.1.0",
-    "electron-reloader": "^1.2.3",
+    "@types/node": "^20.12.7",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "concurrently": "^9.0.1",
+    "cross-env": "^7.0.3",
     "esbuild": "^0.25.12",
-    "nodemon": "^3.1.10",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3",
+    "nodemon": "^3.0.2",
+    "typescript": "^5.6.3",
     "vite": "^7.2.2",
-    "wait-on": "^9.0.3"
+    "wait-on": "^7.2.0"
   }
 }

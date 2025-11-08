@@ -1,0 +1,10 @@
+button {
+  background: #111827;
+  color: #e5e7eb;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+h3 { margin-top: 0; }

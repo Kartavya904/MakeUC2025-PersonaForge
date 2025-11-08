@@ -1,28 +1,16 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-// Expose IPC API to renderer process
+type Unsub = () => void;
+
 contextBridge.exposeInMainWorld("api", {
-  // Recording methods
-  startRecording: () => ipcRenderer.invoke("recording:start"),
-  stopRecording: () => ipcRenderer.invoke("recording:stop"),
-  
-  // NLP/LLM methods
-  nlpAsk: (text: string) => ipcRenderer.invoke("nlp:ask", text),
-  
-  // TTS methods
-  ttsSpeak: (text: string) => ipcRenderer.invoke("tts:speak", text),
-  
-  // Event listeners (for receiving messages from main process)
-  on: (channel: string, callback: (data: any) => void) => {
-    const subscription = (_event: any, data: any) => callback(data);
-    ipcRenderer.on(channel, subscription);
-    
-    // Return unsubscribe function
-    return () => {
-      ipcRenderer.removeListener(channel, subscription);
-    };
-  },
-  
-  // Hotkey methods
-  hotkey: (action: string) => ipcRenderer.invoke("hotkey:trigger", action),
+  startRecording: (rate?: number): Promise<void> => ipcRenderer.invoke("stt:start", rate),
+  stopRecording: (): Promise<void> => ipcRenderer.invoke("stt:stop"),
+  audioChunk: (ab: ArrayBuffer): void => ipcRenderer.send("stt:audio-chunk", Buffer.from(ab)),
+  nlpAsk: (text: string): Promise<string> => ipcRenderer.invoke("nlp:ask", text),
+  ttsSpeak: (text: string): Promise<void> => ipcRenderer.invoke("tts:speak", text),
+  on: (channel: string, cb: (...args: any[]) => void): Unsub => {
+    const wrapped = (_e: any, ...args: any[]) => cb(...args);
+    ipcRenderer.on(channel, wrapped);
+    return () => ipcRenderer.removeListener(channel, wrapped);
+  }
 });
