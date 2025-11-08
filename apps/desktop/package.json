@@ -1,0 +1,38 @@
+{
+  "name": "desktop",
+  "version": "1.0.0",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev:renderer": "vite",
+    "typecheck": "tsc --noEmit",
+    "dev:electron": "cross-env RENDERER_URL=http://localhost:5173 NODE_ENV=development ts-node --esm electron/main.ts",
+    "build:electron": "esbuild electron/main.ts --platform=node --format=esm --outfile=dist-electron/main.js",
+    "build:preload": "esbuild electron/preload.ts --platform=node --format=esm --outfile=dist-electron/preload.js",
+    "build": "npm run build:electron && npm run build:preload && vite build",
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "start": "electron dist-electron/main.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "type": "module",
+  "dependencies": {
+    "electron": "^39.1.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "esbuild": "^0.25.12",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.2"
+  }
+}

@@ -1,0 +1,65 @@
+# --- Core Node / Monorepo ---
+node_modules/
+**/node_modules/
+
+# Builds & bundles
+dist/
+dist-*/
+**/dist/
+**/dist-*/
+apps/**/dist-renderer/
+apps/**/dist-electron/
+
+# Caches
+.npm/
+.pnpm-store/
+.esbuild/
+.vite/
+**/.vite/
+**/.turbo/
+**/.cache/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Env files (keep the public examples tracked)
+.env
+.env.*
+!.env-example
+!.env.example
+
+# Coverage / tests
+coverage/
+*.lcov
+.jest/
+
+# Editor / OS
+.vscode/
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# System / misc
+*.swp
+*.swo
+*.orig
+
+# Electron packaging artifacts
+*.asar
+*.map
+out/
+release/
+
+# Python (if you spin up a local STT sidecar later)
+__pycache__/
+*.pyc
+.venv/
+venv/
