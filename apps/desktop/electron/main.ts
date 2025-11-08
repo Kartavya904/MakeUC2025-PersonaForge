@@ -1,21 +1,22 @@
-// ESM main process, safe with electron-store (ESM) and fetch.
-// Loads .env, exposes Settings IPC, fetches real ElevenLabs voices, and provides tts:preview.
+// apps/desktop/electron/main.ts
+// ESM main process: dotenv, settings store, voices list, TTS preview, robust tray handling.
 
 import * as dotenv from 'dotenv';
-import { app, BrowserWindow, ipcMain, Tray, Menu } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } from 'electron';
 import Store from 'electron-store';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// --- __dirname in ESM + .env load
+// ----- __dirname in ESM + .env -----
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-// --- Types (type-only; erased)
+// ----- Types (type-only) -----
 type AppSettings = import('../renderer/types/settings').AppSettings;
 
-// --- Persistent settings
+// ----- Persistent settings -----
 const store = new Store<AppSettings>({
   name: 'settings',
   defaults: {
@@ -27,8 +28,8 @@ const store = new Store<AppSettings>({
         stability: 0.5,
         similarityBoost: 0.75,
         style: 0.4,
-        speakingRate: 1.0, // 0.5..2
-        pitch: 0,          // -12..+12
+        speakingRate: 1.0,  // 0.5..2
+        pitch: 0,           // -12..+12
         useSpeakerBoost: true
       }
     },
@@ -53,20 +54,41 @@ function applyLoginItem(settings: AppSettings['general']) {
   });
 }
 
+function resolveTrayIcon(): nativeImage | null {
+  // Try dist-electron/icon.ico (Windows) or iconTemplate.png (macOS), fallback to null.
+  const candidates = process.platform === 'win32'
+    ? [path.join(__dirname, 'icon.ico')]
+    : [path.join(__dirname, 'iconTemplate.png'), path.join(__dirname, 'icon.png')];
+
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      const img = nativeImage.createFromPath(p);
+      if (!img.isEmpty()) return img;
+    }
+  }
+  return null;
+}
+
 function setupTray() {
   if (tray) return;
-  const icon = process.platform === 'win32'
-    ? path.join(__dirname, 'icon.ico')
-    : path.join(__dirname, 'iconTemplate.png');
-  tray = new Tray(icon);
-  const ctx = Menu.buildFromTemplate([
-    { label: 'Open PersonaForge', click: () => win?.show() },
-    { type: 'separator' },
-    { label: 'Exit', click: () => app.quit() }
-  ]);
-  tray.setToolTip('PersonaForge — Voice Assistant');
-  tray.setContextMenu(ctx);
-  tray.on('double-click', () => win?.show());
+  try {
+    const iconImg = resolveTrayIcon();
+    if (!iconImg) {
+      console.warn('[tray] icon not found in dist-electron, skipping tray setup.');
+      return;
+    }
+    tray = new Tray(iconImg);
+    const ctx = Menu.buildFromTemplate([
+      { label: 'Open PersonaForge', click: () => win?.show() },
+      { type: 'separator' },
+      { label: 'Exit', click: () => app.quit() }
+    ]);
+    tray.setToolTip('PersonaForge — Voice Assistant');
+    tray.setContextMenu(ctx);
+    tray.on('double-click', () => win?.show());
+  } catch (err) {
+    console.error('[tray] failed to create tray:', err);
+  }
 }
 
 function createWindow() {
@@ -79,7 +101,7 @@ function createWindow() {
     show,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
+      preload: path.join(__dirname, 'preload.cjs'), // built as CJS
       contextIsolation: true,
       nodeIntegration: false
     }
@@ -106,7 +128,7 @@ function createWindow() {
   if (!show) setupTray();
 }
 
-// ---------- Settings IPC ----------
+// ----- Settings IPC -----
 ipcMain.handle('settings:get', () => store.store);
 
 ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => {
@@ -130,7 +152,7 @@ ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => {
   return store.store;
 });
 
-// ---------- ElevenLabs: list voices ----------
+// ----- ElevenLabs voices -----
 type VoiceItem = { id: string; name: string; tone: string; labels?: Record<string,string> };
 
 function getElevenKey(): string | null {
@@ -181,7 +203,7 @@ ipcMain.handle('voices:refresh', async () => {
   return cachedVoices;
 });
 
-// ---------- Assistant lifecycle (stubs) ----------
+// ----- Assistant lifecycle (stubs) -----
 let assistantRunning = false;
 ipcMain.handle('assistant:start', async () => {
   const { behavior } = store.store;
@@ -196,7 +218,7 @@ ipcMain.handle('assistant:stop', async () => {
   return { ok: true };
 });
 
-// ---------- TTS Preview ----------
+// ----- TTS Preview -----
 ipcMain.handle('tts:preview', async (_e, opts?: { text?: string }) => {
   try {
     const s = store.store;
@@ -243,6 +265,7 @@ ipcMain.handle('tts:preview', async (_e, opts?: { text?: string }) => {
   }
 });
 
+// ----- App lifecycle -----
 app.whenReady().then(() => {
   applyLoginItem(store.get('general'));
   createWindow();

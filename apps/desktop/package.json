@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev:renderer": "vite --config vite.config.ts",
+    "assets:copy": "node -e \"const fs=require('fs'),p=require('path');const from=['electron/icon.ico','electron/iconTemplate.png'];const to='dist-electron';fs.mkdirSync(to,{recursive:true});for(const f of from){if(fs.existsSync(f))fs.copyFileSync(f, p.join(to,p.basename(f)));}\"",
     "build:renderer": "vite build --config vite.config.ts",
     "build:preload": "esbuild electron/preload.ts --platform=node --format=cjs --outfile=dist-electron/preload.cjs",
     "build:electron": "esbuild electron/main.ts --platform=node --format=esm --outfile=dist-electron/main.mjs",
-    "build": "npm run build:renderer && npm run build:preload && npm run build:electron",
+    "build": "npm run build:renderer && npm run build:preload && npm run build:electron && npm run assets:copy",
     "start": "electron dist-electron/main.mjs"
   },
   "dependencies": {
