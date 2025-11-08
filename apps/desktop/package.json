@@ -6,11 +6,12 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev:renderer": "vite",
     "typecheck": "tsc --noEmit",
-    "dev:electron": "cross-env RENDERER_URL=http://localhost:5173 NODE_ENV=development ts-node --esm electron/main.ts",
+    "dev:build": "esbuild electron/main.ts electron/preload.ts --platform=node --format=esm --outdir=dist-electron --watch",
+    "dev:electron": "wait-on dist-electron/main.js dist-electron/preload.js && cross-env RENDERER_URL=http://localhost:5173 NODE_ENV=development nodemon --watch dist-electron -e js --exec electron dist-electron/main.js",
     "build:electron": "esbuild electron/main.ts --platform=node --format=esm --outfile=dist-electron/main.js",
     "build:preload": "esbuild electron/preload.ts --platform=node --format=esm --outfile=dist-electron/preload.js",
     "build": "npm run build:electron && npm run build:preload && vite build",
-    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:build\" \"npm:dev:electron\"",
     "start": "electron dist-electron/main.js"
   },
   "keywords": [],
@@ -30,9 +31,12 @@
     "@vitejs/plugin-react": "^5.1.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
+    "electron-reloader": "^1.2.3",
     "esbuild": "^0.25.12",
+    "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
-    "vite": "^7.2.2"
+    "vite": "^7.2.2",
+    "wait-on": "^9.0.3"
   }
 }
