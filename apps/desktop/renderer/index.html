@@ -2,16 +2,23 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src *; worker-src 'self' blob:; font-src 'self' data:;"
-    />
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-eval';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data:;
+    font-src 'self' data:;
+    media-src 'self' data: blob:;
+    connect-src 'self' ws: http://localhost:5173 https://api.elevenlabs.io;
+    worker-src 'self' blob:;
+    frame-src 'self';
+    object-src 'none';
+  ">
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PersonaForge</title>
   </head>
   <body>
     <div id="root"></div>
-    <!-- ✅ relative path works in file:// builds, dev server rewrites it -->
-    <script type="module" src="./main.tsx"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

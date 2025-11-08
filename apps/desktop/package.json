@@ -4,21 +4,19 @@
   "main": "dist-electron/main.cjs",
   "type": "module",
   "scripts": {
-    "dev:renderer": "vite",
-    "dev:build": "esbuild electron/main.ts electron/preload.ts --platform=node --format=cjs --outdir=dist-electron --watch",
-    "dev:electron": "wait-on dist-electron/main.cjs dist-electron/preload.js && cross-env RENDERER_URL=http://localhost:5173 NODE_ENV=development nodemon --watch dist-electron -e cjs,js --exec electron dist-electron/main.cjs",
-    "build:preload": "esbuild electron/preload.ts --platform=node --format=cjs --outfile=dist-electron/preload.js",
-    "build:electron": "esbuild electron/main.ts --platform=node --format=cjs --bundle --external:electron --target=node20 --outfile=dist-electron/main.cjs",
-    "build:renderer": "vite build",
-    "build": "npm run build:electron && npm run build:preload && npm run build:renderer",
-    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:build\" \"npm:dev:electron\"",
-    "start": "electron dist-electron/main.cjs"
+    "dev:renderer": "vite --config vite.config.ts",
+    "build:renderer": "vite build --config vite.config.ts",
+    "build:preload": "esbuild electron/preload.ts --platform=node --format=cjs --outfile=dist-electron/preload.cjs",
+    "build:electron": "esbuild electron/main.ts --platform=node --format=esm --outfile=dist-electron/main.mjs",
+    "build": "npm run build:renderer && npm run build:preload && npm run build:electron",
+    "start": "electron dist-electron/main.mjs"
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.22.0",
     "@google/genai": "^1.29.0",
     "dotenv": "^17.2.3",
     "electron": "^29.4.0",
+    "electron-store": "^11.0.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -1,16 +1,15 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer } from 'electron';
 
-type Unsub = () => void;
+console.log('[preload] loaded');
 
-contextBridge.exposeInMainWorld("api", {
-  startRecording: (rate?: number): Promise<void> => ipcRenderer.invoke("stt:start", rate),
-  stopRecording: (): Promise<void> => ipcRenderer.invoke("stt:stop"),
-  audioChunk: (ab: ArrayBuffer): void => ipcRenderer.send("stt:audio-chunk", Buffer.from(ab)),
-  nlpAsk: (text: string): Promise<string> => ipcRenderer.invoke("nlp:ask", text),
-  ttsSpeak: (text: string): Promise<void> => ipcRenderer.invoke("tts:speak", text),
-  on: (channel: string, cb: (...args: any[]) => void): Unsub => {
-    const wrapped = (_e: any, ...args: any[]) => cb(...args);
-    ipcRenderer.on(channel, wrapped);
-    return () => ipcRenderer.removeListener(channel, wrapped);
-  }
+contextBridge.exposeInMainWorld('persona', {
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  updateSettings: (patch: any) => ipcRenderer.invoke('settings:update', patch),
+  listVoices: () => ipcRenderer.invoke('voices:list'),
+  startAssistant: () => ipcRenderer.invoke('assistant:start'),
+  stopAssistant: () => ipcRenderer.invoke('assistant:stop'),
+  ttsPreview: (text?: string) => ipcRenderer.invoke('tts:preview', { text })
+
 });
+
+console.log('[preload] persona API exposed');

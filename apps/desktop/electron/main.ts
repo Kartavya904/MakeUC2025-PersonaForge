@@ -1,168 +1,264 @@
-import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } from "electron";
-import fs from "node:fs";
-import path from "node:path";
-import dotenv from "dotenv";
-import { sttStart, sttPush, sttStopAndTranscribe } from "./services/stt-eleven";
-import { ttsStream } from "./services/tts-eleven";
-import { createGeminiService, GeminiPlannerService } from "./services/nlp-gemini";
+// ESM main process, safe with electron-store (ESM) and fetch.
+// Loads .env, exposes Settings IPC, fetches real ElevenLabs voices, and provides tts:preview.
 
-function loadEnv() {
-  // candidates: when running from dist-electron/main.cjs
-  //   - process.cwd(): apps/desktop (npm start)
-  //   - __dirname:     apps/desktop/dist-electron  -> ../.env is correct
-  const candidates = [
-    path.resolve(process.cwd(), ".env"),
-    path.resolve(__dirname, "../.env"),
-  ];
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      dotenv.config({ path: p });
-      break;
+import * as dotenv from 'dotenv';
+import { app, BrowserWindow, ipcMain, Tray, Menu } from 'electron';
+import Store from 'electron-store';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// --- __dirname in ESM + .env load
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '../.env') });
+
+// --- Types (type-only; erased)
+type AppSettings = import('../renderer/types/settings').AppSettings;
+
+// --- Persistent settings
+const store = new Store<AppSettings>({
+  name: 'settings',
+  defaults: {
+    version: 1,
+    voice: {
+      tone: 'professional',
+      voiceId: '',
+      params: {
+        stability: 0.5,
+        similarityBoost: 0.75,
+        style: 0.4,
+        speakingRate: 1.0, // 0.5..2
+        pitch: 0,          // -12..+12
+        useSpeakerBoost: true
+      }
+    },
+    behavior: {
+      runAssistant: true,
+      startListeningOnLaunch: false
+    },
+    general: {
+      autoStartOnLogin: false,
+      runMinimized: false
     }
   }
-}
-loadEnv();
+});
 
-const isDev = !!process.env.RENDERER_URL;
-let mainWindow: BrowserWindow | null = null;
+let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
-let geminiService: GeminiPlannerService | null = null;
+
+function applyLoginItem(settings: AppSettings['general']) {
+  app.setLoginItemSettings({
+    openAtLogin: settings.autoStartOnLogin,
+    openAsHidden: settings.runMinimized
+  });
+}
+
+function setupTray() {
+  if (tray) return;
+  const icon = process.platform === 'win32'
+    ? path.join(__dirname, 'icon.ico')
+    : path.join(__dirname, 'iconTemplate.png');
+  tray = new Tray(icon);
+  const ctx = Menu.buildFromTemplate([
+    { label: 'Open PersonaForge', click: () => win?.show() },
+    { type: 'separator' },
+    { label: 'Exit', click: () => app.quit() }
+  ]);
+  tray.setToolTip('PersonaForge — Voice Assistant');
+  tray.setContextMenu(ctx);
+  tray.on('double-click', () => win?.show());
+}
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 720,
-    backgroundColor: "#0b0f14",
-    show: false,
+  const general = store.get('general');
+  const show = !general.runMinimized;
+
+  win = new BrowserWindow({
+    width: 1140,
+    height: 760,
+    show,
+    autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false
     }
   });
 
-  const devUrl = process.env.RENDERER_URL!;
-  const prodUrl = `file://${path.join(__dirname, "../renderer-dist/index.html")}`;
-  const target = isDev ? devUrl : prodUrl;
+  console.log('[preload path]', path.join(__dirname, 'preload.cjs'));
 
-  mainWindow.loadURL(target);
-
-  mainWindow.webContents.on("did-finish-load", () => {
-    console.log("[main] did-finish-load:", target);
-    mainWindow?.show();
+  win.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    console.error('[did-fail-load]', code, desc, url);
+  });
+  win.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[render-process-gone]', details);
+  });
+  win.webContents.on('console-message', (_e, level, message) => {
+    console.log('[renderer]', { level, message });
   });
 
-  mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
-    console.error("[main] did-fail-load:", { code, desc, url });
-  });
+  if (process.env.RENDERER_URL) {
+    win.loadURL(process.env.RENDERER_URL);
+  } else {
+    win.loadFile(path.join(__dirname, '../renderer-dist/index.html'));
+  }
 
-  mainWindow.webContents.on("console-message", (_e, level, message) => {
-    console.log("[renderer]", level, message);
-  });
-
-  mainWindow.on("closed", () => (mainWindow = null));
-
-  // Minimal tray
-  try {
-    const icon = nativeImage.createEmpty();
-    tray = new Tray(icon);
-    tray.setToolTip("PersonaForge");
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: "Show", click: () => mainWindow?.show() },
-        { type: "separator" },
-        { role: "quit" }
-      ])
-    );
-  } catch {}
+  if (!show) setupTray();
 }
 
+// ---------- Settings IPC ----------
+ipcMain.handle('settings:get', () => store.store);
+
+ipcMain.handle('settings:update', (_e, patch: Partial<AppSettings>) => {
+  const curr = store.store;
+  const next: AppSettings = {
+    ...curr,
+    ...patch,
+    voice: {
+      ...curr.voice,
+      ...(patch.voice ?? {}),
+      params: {
+        ...curr.voice.params,
+        ...(patch.voice?.params ?? {})
+      }
+    },
+    behavior: { ...curr.behavior, ...(patch.behavior ?? {}) },
+    general:  { ...curr.general,  ...(patch.general  ?? {}) }
+  };
+  store.store = next;
+  applyLoginItem(next.general);
+  return store.store;
+});
+
+// ---------- ElevenLabs: list voices ----------
+type VoiceItem = { id: string; name: string; tone: string; labels?: Record<string,string> };
+
+function getElevenKey(): string | null {
+  return (
+    process.env.ELEVEN_API_KEY ||
+    process.env.ELEVENLABS_API_KEY ||
+    process.env.ELEVENLABS_APIKEY ||
+    process.env.ELEVENLABS_KEY ||
+    null
+  );
+}
+
+async function fetchElevenVoices(): Promise<VoiceItem[]> {
+  const apiKey = getElevenKey();
+  if (!apiKey) throw new Error('Missing ELEVEN* API key');
+
+  const resp = await fetch('https://api.elevenlabs.io/v1/voices', {
+    headers: { 'xi-api-key': apiKey, 'Accept': 'application/json' }
+  });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(`Voices HTTP ${resp.status}: ${txt.slice(0,200)}`);
+  }
+  const json: any = await resp.json();
+  return (json.voices || []).map((v: any) => {
+    const tone =
+      (v?.labels && (v.labels.tone || v.labels.Tone || v.labels.TONE)) ||
+      'professional';
+    return { id: v.voice_id, name: v.name, tone, labels: v.labels };
+  });
+}
+
+let cachedVoices: VoiceItem[] | null = null;
+let cachedAt = 0;
+
+ipcMain.handle('voices:list', async () => {
+  const now = Date.now();
+  if (!cachedVoices || now - cachedAt > 60_000) {
+    cachedVoices = await fetchElevenVoices();
+    cachedAt = now;
+  }
+  return cachedVoices;
+});
+
+ipcMain.handle('voices:refresh', async () => {
+  cachedVoices = await fetchElevenVoices();
+  cachedAt = Date.now();
+  return cachedVoices;
+});
+
+// ---------- Assistant lifecycle (stubs) ----------
+let assistantRunning = false;
+ipcMain.handle('assistant:start', async () => {
+  const { behavior } = store.store;
+  if (!behavior.runAssistant) return { ok: false, reason: 'Disabled in settings' };
+  assistantRunning = true;
+  console.log('[assistant] started');
+  return { ok: true };
+});
+ipcMain.handle('assistant:stop', async () => {
+  assistantRunning = false;
+  console.log('[assistant] stopped');
+  return { ok: true };
+});
+
+// ---------- TTS Preview ----------
+ipcMain.handle('tts:preview', async (_e, opts?: { text?: string }) => {
+  try {
+    const s = store.store;
+    const apiKey = getElevenKey();
+    if (!apiKey) return { ok: false, reason: 'Missing ELEVEN* API key in .env' };
+    if (!s.voice.voiceId) return { ok: false, reason: 'No voice selected' };
+
+    const ratePct = Math.round((s.voice.params.speakingRate || 1.0) * 100);
+    const pitchSt = Math.round(s.voice.params.pitch || 0);
+    const sample = opts?.text || 'This is a quick voice preview from PersonaForge.';
+    const ssml = `<speak><prosody rate="${ratePct}%" pitch="${pitchSt}st">${sample}</prosody></speak>`;
+
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${s.voice.voiceId}`;
+    const body = {
+      text: ssml,
+      model_id: 'eleven_multilingual_v2',
+      voice_settings: {
+        stability: s.voice.params.stability,
+        similarity_boost: s.voice.params.similarityBoost,
+        style: s.voice.params.style,
+        use_speaker_boost: s.voice.params.useSpeakerBoost
+      }
+    };
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json',
+        'Accept': 'audio/mpeg'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text();
+      return { ok: false, reason: `TTS HTTP ${resp.status}`, detail: txt.slice(0,500) };
+    }
+    const ab = await resp.arrayBuffer();
+    const b64 = Buffer.from(ab).toString('base64');
+    return { ok: true, mime: 'audio/mpeg', audioBase64: b64 };
+  } catch (err: any) {
+    return { ok: false, reason: err?.message || String(err) };
+  }
+});
+
 app.whenReady().then(() => {
-  // Initialize Gemini service
-  geminiService = createGeminiService();
-  if (geminiService) {
-    console.log("[main] Gemini AI planner initialized");
-  } else {
-    console.warn("[main] Gemini disabled - add GEMINI_API_KEY to .env");
-  }
-  
+  applyLoginItem(store.get('general'));
   createWindow();
-});
 
-app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-
-/* ================= STT IPC ================= */
-
-let chunkCount = 0;
-
-ipcMain.handle("stt:start", async (_e, sampleRate?: number) => {
-  sttStart(typeof sampleRate === "number" ? sampleRate : undefined);
-  chunkCount = 0;
-  mainWindow?.webContents.send("app:status", "recording");
-});
-
-ipcMain.on("stt:audio-chunk", (_e, chunk: Buffer) => {
-  chunkCount++;
-  // Uncomment for debugging:
-  // if ((chunkCount % 50) === 1) console.log("[main] mic chunk bytes:", chunk.byteLength, "count:", chunkCount);
-  sttPush(chunk);
-});
-
-ipcMain.handle("stt:stop", async () => {
-  console.log("[main] stop; total chunks:", chunkCount);
-  mainWindow?.webContents.send("app:status", "processing");
-  try {
-    const text = await sttStopAndTranscribe();
-    mainWindow?.webContents.send("stt:final", text || "(no speech detected)");
-  } catch (err) {
-    mainWindow?.webContents.send("error", `STT error: ${String(err)}`);
-  } finally {
-    mainWindow?.webContents.send("app:status", "idle");
-    chunkCount = 0;
+  const { behavior } = store.store;
+  if (behavior.runAssistant && behavior.startListeningOnLaunch) {
+    console.log('[boot] start listening requested');
   }
 });
 
-/* ================= TTS IPC ================= */
-
-ipcMain.handle("tts:speak", async (_e, text: string) => {
-  try {
-    const s = await ttsStream(text);
-    for await (const chunk of s) {
-      const b64 = Buffer.from(chunk).toString("base64");
-      mainWindow?.webContents.send("tts:chunk", b64);
-    }
-    mainWindow?.webContents.send("tts:done");
-  } catch (err) {
-    mainWindow?.webContents.send("error", `TTS error: ${String(err)}`);
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    if (!store.get('general').runMinimized) app.quit();
   }
 });
 
-/* ============== NLP with Gemini ============== */
-
-ipcMain.handle("nlp:ask", async (_e, prompt: string) => {
-  console.log("[main] nlp:ask:", prompt);
-  mainWindow?.webContents.send("app:status", "processing");
-  
-  try {
-    if (!geminiService) {
-      console.warn("[main] Gemini not available, using mock");
-      mainWindow?.webContents.send("app:status", "idle");
-      return `You said: "${prompt}". Add GEMINI_API_KEY to .env for AI planning.`;
-    }
-
-    // Generate task plan with Gemini
-    const plan = await geminiService.generateTaskPlan(prompt);
-    
-    // Format response for user
-    const response = `Task: ${plan.task}\nRisk: ${plan.risk}\n\nSteps:\n${plan.steps.map((s, i) => `${i + 1}. ${s.op} ${s.target || s.app || s.text || ''}`).join('\n')}`;
-    
-    mainWindow?.webContents.send("app:status", "idle");
-    console.log("[main] Generated plan:", plan);
-    return response;
-  } catch (err) {
-    mainWindow?.webContents.send("app:status", "idle");
-    console.error("[main] Gemini error:", err);
-    return `Error: ${String(err)}`;
-  }
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });

@@ -1,18 +1,14 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import path from "node:path";
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
 
+// IMPORTANT: our index.html lives in ./renderer/
 export default defineConfig({
-  base: "./",                          // ✅ relative asset paths for file://
+  root: 'renderer',
+  base: './',                            // needed for file:// loads
   plugins: [react()],
-  root: path.resolve(__dirname, "renderer"),
-  publicDir: path.resolve(__dirname, "renderer/public"),
+  server: { port: 5173, strictPort: true },
   build: {
-    outDir: path.resolve(__dirname, "renderer-dist"),
-    emptyOutDir: true,
-  },
-  server: {
-    port: 5173,
-    strictPort: true,
-  },
+    outDir: '../renderer-dist',          // output to apps/desktop/renderer-dist
+    emptyOutDir: true
+  }
 });
