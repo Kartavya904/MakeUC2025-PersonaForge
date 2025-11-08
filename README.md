@@ -1,4 +1,4 @@
-# PersonaForge — Where voice meets AIs
+# PersonaForge — Where voice meets AI
 
 Consent‑First Voice Agent for Windows
 Near-zero-latency voice → intent → action → voice loop for common Windows tasks. Wake with a key or phrase, transcribe, ask Gemini to plan JSON steps, route to executors, and reply via ElevenLabs.
