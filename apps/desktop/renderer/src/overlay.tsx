@@ -11,8 +11,20 @@ type OverlayApi = {
   collapse: () => Promise<{ ok: boolean }>;
 };
 
+type SecurityApi = {
+  validatePlan: (plan: any, userInput: string) => Promise<{ ok: boolean; allowed?: boolean; reason?: string; requiresApproval?: boolean; requiresPin?: boolean }>;
+  requestConsent: (plan: any, userInput: string) => Promise<{ ok: boolean; approved?: boolean; pinVerified?: boolean }>;
+  logAction: (userInput: string, plan: any, approved: boolean, executed: boolean, error?: string) => Promise<{ ok: boolean }>;
+  killSwitchStatus: () => Promise<{ ok: boolean; active?: boolean }>;
+  executeTask: (plan: any, userInput: string) => Promise<{ ok: boolean; success?: boolean; error?: string; executedSteps?: number }>;
+};
+
 function useOverlay(): OverlayApi | null {
   return (window as any).overlay ?? null;
+}
+
+function useSecurity(): SecurityApi | null {
+  return (window as any).security ?? null;
 }
 
 type Message = {
@@ -24,17 +36,35 @@ type Message = {
 
 function OverlayApp() {
   const overlay = useOverlay();
+  const security = useSecurity();
   const [expanded, setExpanded] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [listening, setListening] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [wakeWordActive, setWakeWordActive] = useState(false);
+  const [killSwitchActive, setKillSwitchActive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const wakeWordIntervalRef = useRef<number | null>(null);
   const recordingTimeoutRef = useRef<number | null>(null);
+
+  // Check kill switch status on mount and periodically
+  useEffect(() => {
+    if (!security) return;
+    
+    const checkKillSwitch = async () => {
+      const status = await security.killSwitchStatus();
+      if (status.ok) {
+        setKillSwitchActive(status.active || false);
+      }
+    };
+    
+    checkKillSwitch();
+    const interval = setInterval(checkKillSwitch, 2000);
+    return () => clearInterval(interval);
+  }, [security]);
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -243,16 +273,79 @@ function OverlayApp() {
       
       if (result.ok && result.text) {
         console.log('[recording] Transcribed:', result.text);
+        const userInput = result.text;
         const userMessage: Message = {
           id: Date.now().toString(),
           type: 'user',
-          text: result.text,
+          text: userInput,
           timestamp: Date.now()
         };
         setMessages(prev => [...prev, userMessage]);
 
-        // Generate dummy response
-        const response = generateDummyResponse(result.text);
+        // Check kill switch
+        if (killSwitchActive) {
+          const errorMsg = 'Kill switch is active. All actions are blocked.';
+          const errorMessage: Message = {
+            id: (Date.now() + 1).toString(),
+            type: 'assistant',
+            text: errorMsg,
+            timestamp: Date.now()
+          };
+          setMessages(prev => [...prev, errorMessage]);
+          await speakText(errorMsg);
+          return;
+        }
+
+        // Generate task plan using Gemini (if available) or use dummy response
+        let response = '';
+        let plan: any = null;
+
+        try {
+          // Try to get plan from Gemini via IPC (would need to be added to main process)
+          // For now, we'll use a simple plan generator
+          plan = generateSimplePlan(userInput);
+          
+          if (security && plan) {
+            // Validate plan with security
+            const validation = await security.validatePlan(plan, userInput);
+            
+            if (!validation.allowed) {
+              response = `I cannot execute that: ${validation.reason || 'Security validation failed'}`;
+            } else {
+              // Request consent if needed
+              let approved = true;
+              if (validation.requiresApproval || validation.requiresPin) {
+                const consent = await security.requestConsent(plan, userInput);
+                approved = consent.ok && (consent.approved || false);
+                
+                if (!approved) {
+                  response = 'Action was denied.';
+                }
+              }
+
+              if (approved) {
+                // Execute task
+                const execResult = await security.executeTask(plan, userInput);
+                if (execResult.ok && execResult.success) {
+                  response = `Task completed successfully. ${plan.task}`;
+                } else {
+                  response = `Task execution failed: ${execResult.error || 'Unknown error'}`;
+                }
+              }
+            }
+          } else {
+            // Fallback to dummy response if security not available
+            response = generateDummyResponse(userInput);
+          }
+        } catch (err: any) {
+          console.error('[overlay] Error processing task:', err);
+          response = `I encountered an error: ${err?.message || 'Unknown error'}`;
+        }
+
+        if (!response) {
+          response = generateDummyResponse(userInput);
+        }
+
         console.log('[recording] Response:', response);
         
         const assistantMessage: Message = {
@@ -297,6 +390,42 @@ function OverlayApp() {
       return 'I don\'t have access to weather data yet, but I\'m working on it!';
     }
     return `I heard you say: "${input}". This is a dummy response for now.`;
+  };
+
+  const generateSimplePlan = (input: string): any => {
+    // Simple plan generator - in production, this would call Gemini
+    const lower = input.toLowerCase();
+    
+    if (lower.includes('brightness')) {
+      const match = input.match(/(\d+)\s*%?/);
+      const value = match ? match[1] : '50';
+      return {
+        task: `Set brightness to ${value}%`,
+        risk: 'low' as const,
+        steps: [
+          { op: 'SystemSetting', target: 'display.brightness', value }
+        ]
+      };
+    }
+    
+    if (lower.includes('open') && lower.includes('settings')) {
+      return {
+        task: 'Open Windows Settings',
+        risk: 'low' as const,
+        steps: [
+          { op: 'OpenApp', app: 'ms-settings:' }
+        ]
+      };
+    }
+    
+    // Default: just confirm
+    return {
+      task: input,
+      risk: 'low' as const,
+      steps: [
+        { op: 'Confirm', text: `I heard: "${input}"` }
+      ]
+    };
   };
 
   const speakText = async (text: string) => {
@@ -361,9 +490,22 @@ function OverlayApp() {
       </div>
       
       <div className="overlay-messages">
+        {killSwitchActive && (
+          <div className="overlay-kill-switch-warning" style={{ 
+            background: '#ff4444', 
+            color: 'white', 
+            padding: '8px', 
+            textAlign: 'center',
+            fontSize: '12px',
+            fontWeight: 'bold'
+          }}>
+            ⚠️ KILL SWITCH ACTIVE - All actions blocked
+          </div>
+        )}
         {messages.length === 0 && !listening && !processing && (
           <div className="overlay-empty">
             <p>Say "Chad" to activate</p>
+            {killSwitchActive && <p style={{ color: '#ff4444', fontSize: '11px' }}>Kill switch is active</p>}
           </div>
         )}
         {messages.map(msg => (

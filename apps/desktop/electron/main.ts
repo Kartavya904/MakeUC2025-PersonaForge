@@ -2,7 +2,7 @@
 // ESM main process: dotenv, settings store, voices list, TTS preview, robust tray handling.
 
 import * as dotenv from 'dotenv';
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, type NativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, globalShortcut, type NativeImage } from 'electron';
 import Store from 'electron-store';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -15,6 +15,15 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 // ----- Types (type-only) -----
 type AppSettings = import('../renderer/types/settings').AppSettings;
+
+// ----- Security Service -----
+import { getSecurityService } from './services/security.js';
+import { SecurityConsentService } from './services/security-consent.js';
+import { SecureTaskExecutor } from './services/task-executor.js';
+
+let securityService = getSecurityService();
+let consentService = new SecurityConsentService(securityService);
+let taskExecutor = new SecureTaskExecutor(securityService, consentService);
 
 // ----- Persistent settings -----
 const store = new Store<AppSettings>({
@@ -398,6 +407,73 @@ ipcMain.handle('overlay:stt:stop', async () => {
   }
 });
 
+// ----- Security IPC Handlers -----
+ipcMain.handle('security:validate-plan', async (_e, plan: any, userInput: string) => {
+  try {
+    const result = securityService.validateTaskPlan(plan, userInput);
+    return { ok: true, ...result };
+  } catch (err: any) {
+    return { ok: false, reason: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('security:request-consent', async (_e, plan: any, userInput: string) => {
+  try {
+    const window = BrowserWindow.getFocusedWindow() || win || overlayWin;
+    const result = await consentService.requestConsent(plan, userInput, window || undefined);
+    return { ok: true, ...result };
+  } catch (err: any) {
+    return { ok: false, reason: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('security:log-action', async (_e, userInput: string, plan: any, approved: boolean, executed: boolean, error?: string) => {
+  try {
+    await securityService.logAction(userInput, plan, approved, executed, error);
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, reason: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle('security:kill-switch:activate', async () => {
+  securityService.activateKillSwitch();
+  return { ok: true };
+});
+
+ipcMain.handle('security:kill-switch:deactivate', async () => {
+  securityService.deactivateKillSwitch();
+  return { ok: true };
+});
+
+ipcMain.handle('security:kill-switch:status', async () => {
+  return { ok: true, active: securityService.isKillSwitchActive() };
+});
+
+ipcMain.handle('security:get-config', async () => {
+  return { ok: true, config: securityService.getConfig() };
+});
+
+ipcMain.handle('security:update-config', async (_e, config: Partial<any>) => {
+  securityService.updateConfig(config);
+  return { ok: true, config: securityService.getConfig() };
+});
+
+ipcMain.handle('security:get-audit-logs', async (_e, limit?: number) => {
+  const logs = securityService.getAuditLogs(limit);
+  return { ok: true, logs };
+});
+
+ipcMain.handle('task:execute', async (_e, plan: any, userInput: string) => {
+  try {
+    const window = BrowserWindow.getFocusedWindow() || win || overlayWin;
+    const result = await taskExecutor.executePlan(plan, userInput, window || undefined);
+    return { ok: true, ...result };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+});
+
 ipcMain.handle('overlay:tts:speak', async (_e, text: string) => {
   if (!assistantRunning) return { ok: false, reason: 'Assistant not running' };
   try {
@@ -534,10 +610,36 @@ app.whenReady().then(() => {
   applyLoginItem(store.get('general'));
   createWindow();
 
+  // Register kill switch hotkey (Ctrl+Shift+F12)
+  globalShortcut.register('CommandOrControl+Shift+F12', () => {
+    if (securityService.isKillSwitchActive()) {
+      securityService.deactivateKillSwitch();
+      console.log('[SECURITY] Kill switch deactivated via hotkey');
+      if (win) {
+        win.webContents.send('security:kill-switch-changed', { active: false });
+      }
+      if (overlayWin) {
+        overlayWin.webContents.send('security:kill-switch-changed', { active: false });
+      }
+    } else {
+      securityService.activateKillSwitch();
+      console.log('[SECURITY] Kill switch activated via hotkey');
+      if (win) {
+        win.webContents.send('security:kill-switch-changed', { active: true });
+      }
+      if (overlayWin) {
+        overlayWin.webContents.send('security:kill-switch-changed', { active: true });
+      }
+    }
+  });
+
   const { behavior } = store.store;
   if (behavior.runAssistant && behavior.startListeningOnLaunch) {
     console.log('[boot] start listening requested');
   }
+  
+  console.log('[SECURITY] Security service initialized');
+  console.log('[SECURITY] Kill switch hotkey: Ctrl+Shift+F12');
 });
 
 app.on('window-all-closed', () => {
@@ -549,6 +651,9 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  // Unregister all shortcuts
+  globalShortcut.unregisterAll();
+  
   // Clean up overlay window
   if (overlayWin) {
     overlayWin.removeAllListeners('close');
