@@ -1,8 +1,8 @@
 // Settings with Preview button, no Behavior tab, clickable logo to go back,
 // header "Start Voice Assistant" button, and no white outer padding.
 
-import { useEffect, useMemo, useState } from 'react';
-import type { AppSettings, ToneKey } from '../../types/settings';
+import { useEffect, useMemo, useState } from "react";
+import type { AppSettings, ToneKey } from "../../types/settings";
 
 type PersonaApi = {
   getSettings(): Promise<AppSettings>;
@@ -10,7 +10,12 @@ type PersonaApi = {
   listVoices(): Promise<Array<{ id: string; name: string; tone: string }>>;
   startAssistant(): Promise<{ ok: boolean; reason?: string }>;
   stopAssistant(): Promise<{ ok: boolean }>;
-  ttsPreview?: (text?: string) => Promise<{ ok: boolean; audioBase64?: string; mime?: string; reason?: string }>;
+  ttsPreview?: (text?: string) => Promise<{
+    ok: boolean;
+    audioBase64?: string;
+    mime?: string;
+    reason?: string;
+  }>;
 };
 
 function usePersona(): PersonaApi | null {
@@ -18,18 +23,24 @@ function usePersona(): PersonaApi | null {
 }
 
 const TONES: { key: ToneKey; label: string; desc: string }[] = [
-  { key: 'professional', label: 'Professional', desc: 'Clear, confident, neutral' },
-  { key: 'friendly',     label: 'Friendly',     desc: 'Warm, approachable, casual' },
-  { key: 'storyteller',  label: 'Storyteller',  desc: 'Calm, rich, paced' },
-  { key: 'energetic',    label: 'Energetic',    desc: 'Upbeat, fast, lively' },
-  { key: 'calm',         label: 'Calm',         desc: 'Soft, slower, soothing' }
+  {
+    key: "professional",
+    label: "Professional",
+    desc: "Clear, confident, neutral",
+  },
+  { key: "friendly", label: "Friendly", desc: "Warm, approachable, casual" },
+  { key: "storyteller", label: "Storyteller", desc: "Calm, rich, paced" },
+  { key: "energetic", label: "Energetic", desc: "Upbeat, fast, lively" },
+  { key: "calm", label: "Calm", desc: "Soft, slower, soothing" },
 ];
 
 export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
   const persona = usePersona();
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [voices, setVoices] = useState<Array<{ id: string; name: string; tone: string }>>([]);
-  const [tab, setTab] = useState<'voice'|'general'>('voice');
+  const [voices, setVoices] = useState<
+    Array<{ id: string; name: string; tone: string }>
+  >([]);
+  const [tab, setTab] = useState<"voice" | "general">("voice");
   const [previewing, setPreviewing] = useState(false);
   const [starting, setStarting] = useState(false);
 
@@ -38,16 +49,21 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
     (async () => {
       const [s, v] = await Promise.all([
         persona.getSettings(),
-        persona.listVoices()
+        persona.listVoices(),
       ]);
       setSettings(s);
       setVoices(v);
       // ensure a valid voice is selected
-      const needsDefault = (!s.voice.voiceId && v.length) ||
-                           (s.voice.voiceId && v.length && !v.some(x => x.id === s.voice.voiceId));
+      const needsDefault =
+        (!s.voice.voiceId && v.length) ||
+        (s.voice.voiceId &&
+          v.length &&
+          !v.some((x) => x.id === s.voice.voiceId));
       if (needsDefault) {
-        const match = v.find(x => x.tone === s.voice.tone) ?? v[0];
-        const ns = await persona.updateSettings({ voice: { voiceId: match.id } as any });
+        const match = v.find((x) => x.tone === s.voice.tone) ?? v[0];
+        const ns = await persona.updateSettings({
+          voice: { voiceId: match.id } as any,
+        });
         setSettings(ns);
       }
     })().catch(console.error);
@@ -55,7 +71,7 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
 
   const toneVoices = useMemo(() => {
     if (!settings) return [];
-    return voices.filter(v => v.tone === settings.voice.tone);
+    return voices.filter((v) => v.tone === settings.voice.tone);
   }, [voices, settings?.voice.tone]);
 
   if (!persona) {
@@ -63,7 +79,9 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
       <div className="sp-root">
         <style>{STYLES}</style>
         <div className="sp-container">
-          <div className="sp-card"><div>Bridge not ready. Check preload path.</div></div>
+          <div className="sp-card">
+            <div>Bridge not ready. Check preload path.</div>
+          </div>
         </div>
       </div>
     );
@@ -73,7 +91,9 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
       <div className="sp-root">
         <style>{STYLES}</style>
         <div className="sp-container">
-          <div className="sp-card"><div>Loading settings…</div></div>
+          <div className="sp-card">
+            <div>Loading settings…</div>
+          </div>
         </div>
       </div>
     );
@@ -85,16 +105,20 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
   };
 
   const doPreview = async () => {
-    if (!persona.ttsPreview) return alert('Preview unavailable (preload missing tts).');
+    if (!persona.ttsPreview)
+      return alert("Preview unavailable (preload missing tts).");
     try {
       setPreviewing(true);
-      const res = await persona.ttsPreview('This is your PersonaForge preview.');
-      if (!res.ok || !res.audioBase64) return alert(`Preview failed: ${res.reason ?? 'Unknown error'}`);
+      const res = await persona.ttsPreview(
+        "This is your PersonaForge preview."
+      );
+      if (!res.ok || !res.audioBase64)
+        return alert(`Preview failed: ${res.reason ?? "Unknown error"}`);
       // base64 -> blob -> object URL (CSP-friendly)
       const bin = atob(res.audioBase64);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const blob = new Blob([bytes], { type: res.mime || 'audio/mpeg' });
+      const blob = new Blob([bytes], { type: res.mime || "audio/mpeg" });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       await audio.play();
@@ -107,8 +131,19 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
   const startAssistant = async () => {
     try {
       setStarting(true);
+      // Stop assistant first if it's running (acts as refresh/restart)
+      await persona.stopAssistant();
+      // Brief delay to ensure cleanup completes
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Now start it again
       const r = await persona.startAssistant();
-      if (!r.ok) alert(r.reason ?? 'Could not start assistant');
+      if (!r.ok) {
+        const message =
+          r.reason === "Disabled in settings"
+            ? "Voice assistant is disabled. Please enable it in the General settings tab."
+            : r.reason ?? "Could not start assistant";
+        alert(message);
+      }
     } finally {
       setStarting(false);
     }
@@ -125,16 +160,34 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
           </button>
 
           <nav className="sp-tabs">
-            <button className={`sp-tab ${tab==='voice'?'is-active':''}`} onClick={()=>setTab('voice')}>Voice</button>
-            <button className={`sp-tab ${tab==='general'?'is-active':''}`} onClick={()=>setTab('general')}>General</button>
+            <button
+              className={`sp-tab ${tab === "voice" ? "is-active" : ""}`}
+              onClick={() => setTab("voice")}
+            >
+              Voice
+            </button>
+            <button
+              className={`sp-tab ${tab === "general" ? "is-active" : ""}`}
+              onClick={() => setTab("general")}
+            >
+              General
+            </button>
           </nav>
 
           <div className="sp-actions">
-            <button className="sp-btn" onClick={doPreview} disabled={previewing}>
-              {previewing ? 'Previewing…' : 'Preview voice'}
+            <button
+              className="sp-btn"
+              onClick={doPreview}
+              disabled={previewing}
+            >
+              {previewing ? "Previewing…" : "Preview voice"}
             </button>
-            <button className="sp-btn sp-btn-primary" onClick={startAssistant} disabled={starting}>
-              {starting ? 'Starting…' : 'Start Voice Assistant'}
+            <button
+              className="sp-btn sp-btn-primary"
+              onClick={startAssistant}
+              disabled={starting}
+            >
+              {starting ? "Starting…" : "Start Voice Assistant"}
             </button>
           </div>
         </header>
@@ -142,15 +195,17 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
         <main className="sp-grid">
           {/* Left: main card */}
           <section className="sp-card">
-            {tab === 'voice' && (
+            {tab === "voice" && (
               <div className="sp-section">
                 <h3 className="sp-h3">Tone</h3>
                 <div className="sp-tone-grid">
-                  {TONES.map(t => (
+                  {TONES.map((t) => (
                     <button
                       key={t.key}
                       onClick={() => update({ voice: { tone: t.key } as any })}
-                      className={`sp-tone ${settings.voice.tone===t.key ? 'is-on':''}`}
+                      className={`sp-tone ${
+                        settings.voice.tone === t.key ? "is-on" : ""
+                      }`}
                     >
                       <div className="sp-tone-title">{t.label}</div>
                       <div className="sp-tone-desc">{t.desc}</div>
@@ -162,47 +217,123 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
                   <label className="sp-label">Voice</label>
                   <select
                     value={settings.voice.voiceId}
-                    onChange={e => update({ voice: { voiceId: e.target.value } as any })}
+                    onChange={(e) =>
+                      update({ voice: { voiceId: e.target.value } as any })
+                    }
                     className="sp-select"
                   >
-                    {toneVoices.map(v => (
-                      <option key={v.id} value={v.id}>{v.name}</option>
+                    {toneVoices.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
                     ))}
-                    {toneVoices.length === 0 && voices.map(v => (
-                      <option key={v.id} value={v.id}>{v.name}</option>
-                    ))}
+                    {toneVoices.length === 0 &&
+                      voices.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name}
+                        </option>
+                      ))}
                   </select>
                 </div>
 
                 <div className="sp-slider-grid">
-                  <Slider label="Stability"        min={0}   max={1}  step={0.01} value={settings.voice.params.stability}
-                    onChange={(v)=>update({ voice: { params: { stability: v } } as any })} />
-                  <Slider label="Similarity Boost" min={0}   max={1}  step={0.01} value={settings.voice.params.similarityBoost}
-                    onChange={(v)=>update({ voice: { params: { similarityBoost: v } } as any })} />
-                  <Slider label="Style"            min={0}   max={1}  step={0.01} value={settings.voice.params.style}
-                    onChange={(v)=>update({ voice: { params: { style: v } } as any })} />
-                  <Slider label="Speaking Rate"    min={0.5} max={2}  step={0.05} value={settings.voice.params.speakingRate}
-                    onChange={(v)=>update({ voice: { params: { speakingRate: v } } as any })} />
-                  <Slider label="Pitch (semitones)"min={-12} max={12} step={1}    value={settings.voice.params.pitch}
-                    onChange={(v)=>update({ voice: { params: { pitch: v } } as any })} />
-                  <Toggle label="Use Speaker Boost" checked={settings.voice.params.useSpeakerBoost}
-                    onChange={(checked)=>update({ voice: { params: { useSpeakerBoost: checked } } as any })} />
+                  <Slider
+                    label="Stability"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.voice.params.stability}
+                    onChange={(v) =>
+                      update({ voice: { params: { stability: v } } as any })
+                    }
+                  />
+                  <Slider
+                    label="Similarity Boost"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.voice.params.similarityBoost}
+                    onChange={(v) =>
+                      update({
+                        voice: { params: { similarityBoost: v } } as any,
+                      })
+                    }
+                  />
+                  <Slider
+                    label="Style"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.voice.params.style}
+                    onChange={(v) =>
+                      update({ voice: { params: { style: v } } as any })
+                    }
+                  />
+                  <Slider
+                    label="Speaking Rate"
+                    min={0.5}
+                    max={2}
+                    step={0.05}
+                    value={settings.voice.params.speakingRate}
+                    onChange={(v) =>
+                      update({ voice: { params: { speakingRate: v } } as any })
+                    }
+                  />
+                  <Slider
+                    label="Pitch (semitones)"
+                    min={-12}
+                    max={12}
+                    step={1}
+                    value={settings.voice.params.pitch}
+                    onChange={(v) =>
+                      update({ voice: { params: { pitch: v } } as any })
+                    }
+                  />
+                  <Toggle
+                    label="Use Speaker Boost"
+                    checked={settings.voice.params.useSpeakerBoost}
+                    onChange={(checked) =>
+                      update({
+                        voice: { params: { useSpeakerBoost: checked } } as any,
+                      })
+                    }
+                  />
                 </div>
               </div>
             )}
 
-            {tab === 'general' && (
+            {tab === "general" && (
               <div className="sp-section">
                 <h3 className="sp-h3">General</h3>
                 <Toggle
+                  label="Enable voice assistant"
+                  checked={settings.behavior.runAssistant}
+                  onChange={(checked) =>
+                    update({ behavior: { runAssistant: checked } as any })
+                  }
+                />
+                <Toggle
+                  label="Start assistant on launch"
+                  checked={settings.behavior.startListeningOnLaunch}
+                  onChange={(checked) =>
+                    update({
+                      behavior: { startListeningOnLaunch: checked } as any,
+                    })
+                  }
+                />
+                <Toggle
                   label="Auto-run on startup"
                   checked={settings.general.autoStartOnLogin}
-                  onChange={(checked)=>update({ general: { autoStartOnLogin: checked } as any })}
+                  onChange={(checked) =>
+                    update({ general: { autoStartOnLogin: checked } as any })
+                  }
                 />
                 <Toggle
                   label="Run minimized"
                   checked={settings.general.runMinimized}
-                  onChange={(checked)=>update({ general: { runMinimized: checked } as any })}
+                  onChange={(checked) =>
+                    update({ general: { runMinimized: checked } as any })
+                  }
                 />
               </div>
             )}
@@ -211,8 +342,14 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
           {/* Right: live summary */}
           <aside className="sp-card sp-aside">
             <h4 className="sp-h4">Current voice</h4>
-            <div className="sp-kv"><span>Tone</span><b>{settings.voice.tone}</b></div>
-            <div className="sp-kv"><span>Voice ID</span><b className="sp-code">{settings.voice.voiceId || '(none)'}</b></div>
+            <div className="sp-kv">
+              <span>Tone</span>
+              <b>{settings.voice.tone}</b>
+            </div>
+            <div className="sp-kv">
+              <span>Voice ID</span>
+              <b className="sp-code">{settings.voice.voiceId || "(none)"}</b>
+            </div>
             <div className="sp-hr" />
             <h4 className="sp-h4">Parameters</h4>
             <div className="sp-grid-2">
@@ -221,7 +358,10 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
               <KV k="Style" v={settings.voice.params.style} />
               <KV k="Rate" v={settings.voice.params.speakingRate} />
               <KV k="Pitch" v={settings.voice.params.pitch} />
-              <KV k="Speaker boost" v={settings.voice.params.useSpeakerBoost ? 'On' : 'Off'} />
+              <KV
+                k="Speaker boost"
+                v={settings.voice.params.useSpeakerBoost ? "On" : "Off"}
+              />
             </div>
           </aside>
         </main>
@@ -230,7 +370,14 @@ export default function SettingsPanel({ onBack }: { onBack?: () => void }) {
   );
 }
 
-function Slider(props: { label: string; min: number; max: number; step: number; value: number; onChange: (v:number)=>void }) {
+function Slider(props: {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  onChange: (v: number) => void;
+}) {
   return (
     <div className="sp-row">
       <label className="sp-label">{props.label}</label>
@@ -241,7 +388,7 @@ function Slider(props: { label: string; min: number; max: number; step: number; 
           max={props.max}
           step={props.step}
           value={props.value}
-          onChange={(e)=>props.onChange(parseFloat(e.target.value))}
+          onChange={(e) => props.onChange(parseFloat(e.target.value))}
           className="sp-slider"
         />
         <span className="sp-val">{props.value}</span>
@@ -250,18 +397,31 @@ function Slider(props: { label: string; min: number; max: number; step: number; 
   );
 }
 
-function Toggle(props: { label: string; checked: boolean; onChange: (v:boolean)=>void }) {
+function Toggle(props: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <label className="sp-toggle">
-      <input type="checkbox" checked={props.checked} onChange={e=>props.onChange(e.target.checked)} />
+      <input
+        type="checkbox"
+        checked={props.checked}
+        onChange={(e) => props.onChange(e.target.checked)}
+      />
       <span className="sp-switch" />
       <span className="sp-toggle-label">{props.label}</span>
     </label>
   );
 }
 
-function KV({k, v}:{k:string; v:any}) {
-  return <div className="sp-kv"><span>{k}</span><b>{String(v)}</b></div>;
+function KV({ k, v }: { k: string; v: any }) {
+  return (
+    <div className="sp-kv">
+      <span>{k}</span>
+      <b>{String(v)}</b>
+    </div>
+  );
 }
 
 // --- CSS (scoped) ---
