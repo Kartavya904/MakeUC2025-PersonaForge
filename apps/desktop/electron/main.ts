@@ -625,24 +625,60 @@ ipcMain.handle("nlp:generate-plan", async (_e, userInput: string) => {
   }
 });
 
+ipcMain.handle("nlp:classify-query", async (_e, userInput: string) => {
+  try {
+    if (!geminiService) {
+      // Fallback classification based on keywords
+      const executorKeywords = ["open", "set", "change", "launch", "start", "close", "type", "send", "mute", "volume", "brightness", "increase", "decrease"];
+      const lowerInput = userInput.toLowerCase();
+      const hasExecutorKeyword = executorKeywords.some(keyword => lowerInput.includes(keyword));
+      return { ok: true, classification: hasExecutorKeyword ? "executor" : "conversational" };
+    }
+
+    const classification = await geminiService.classifyQuery(userInput);
+    return { ok: true, classification };
+  } catch (err: any) {
+    console.error("[NLP] Error classifying query:", err);
+    // Fallback classification
+    const executorKeywords = ["open", "set", "change", "launch", "start", "close", "type", "send", "mute", "volume", "brightness", "increase", "decrease"];
+    const lowerInput = userInput.toLowerCase();
+    const hasExecutorKeyword = executorKeywords.some(keyword => lowerInput.includes(keyword));
+    return { ok: true, classification: hasExecutorKeyword ? "executor" : "conversational" };
+  }
+});
+
 ipcMain.handle("nlp:conversational-response", async (_e, userInput: string) => {
   try {
     if (!geminiService) {
+      const fallbackResponse = "I'm here to help! How can I assist you today?";
+      const fallbackRaw = JSON.stringify({
+        error: "Gemini service not available",
+        fallback: true,
+        response: fallbackResponse,
+      }, null, 2);
       return {
         ok: false,
         reason: "Gemini service not available",
-        response: "I'm here to help! How can I assist you today?",
+        response: fallbackResponse,
+        rawResponse: fallbackRaw,
       };
     }
 
-    const response = await geminiService.generateConversationalResponse(userInput);
-    return { ok: true, response };
+    const result = await geminiService.generateConversationalResponse(userInput);
+    return { ok: true, response: result.text, rawResponse: result.rawResponse };
   } catch (err: any) {
     console.error("[NLP] Error generating conversational response:", err);
+    const fallbackResponse = "I'm here to help! How can I assist you today?";
+    const fallbackRaw = JSON.stringify({
+      error: err?.message || "Unknown error",
+      fallback: true,
+      response: fallbackResponse,
+    }, null, 2);
     return {
       ok: false,
       reason: err?.message || "Unknown error",
-      response: "I'm here to help! How can I assist you today?",
+      response: fallbackResponse,
+      rawResponse: fallbackRaw,
     };
   }
 });

@@ -37,6 +37,9 @@ type OverlayApi = {
   }>;
   expand: () => Promise<{ ok: boolean }>;
   collapse: () => Promise<{ ok: boolean }>;
+  classifyQuery: (
+    userInput: string
+  ) => Promise<{ ok: boolean; classification?: "executor" | "conversational" }>;
   generatePlan: (
     userInput: string
   ) => Promise<{ ok: boolean; plan?: any; rawResponse?: string; reason?: string }>;
@@ -45,7 +48,7 @@ type OverlayApi = {
   ) => Promise<{ ok: boolean; executable?: boolean }>;
   getConversationalResponse: (
     userInput: string
-  ) => Promise<{ ok: boolean; response?: string; reason?: string }>;
+  ) => Promise<{ ok: boolean; response?: string; rawResponse?: string; reason?: string }>;
   moveWindow: (deltaX: number, deltaY: number) => Promise<{ ok: boolean }>;
   showMainWindow: () => Promise<{ ok: boolean }>;
 };
@@ -161,74 +164,88 @@ function OverlayApp() {
       let plan: any = null;
       let rawResponse: string | undefined = undefined;
 
-      // Generate task plan using Gemini NLP service
-      if (overlay.generatePlan) {
-        const planResult = await overlay.generatePlan(userInput);
-        if (planResult.ok && planResult.plan) {
-          plan = planResult.plan;
-          rawResponse = planResult.rawResponse;
-          console.log("[overlay] Generated plan:", plan);
-        } else {
-          throw new Error(planResult.reason || "Failed to generate plan");
+      // First, classify the query to determine if it's executor task or conversational
+      let classification: "executor" | "conversational" = "executor";
+      if (overlay.classifyQuery) {
+        const classificationResult = await overlay.classifyQuery(userInput);
+        if (classificationResult.ok && classificationResult.classification) {
+          classification = classificationResult.classification;
+          console.log("[overlay] Query classified as:", classification);
         }
-      } else {
-        throw new Error("Plan generation not available");
       }
 
-      // Check if the plan is executable (has real actions beyond just Confirm)
-      let isExecutable = false;
-      if (overlay.isPlanExecutable && plan) {
-        const executableResult = await overlay.isPlanExecutable(plan);
-        isExecutable = executableResult.ok && (executableResult.executable || false);
-        console.log("[overlay] Plan is executable:", isExecutable);
-      }
-
-      // If plan is not executable (e.g., simple questions, greetings), use conversational response
-      if (!isExecutable && overlay.getConversationalResponse) {
-        console.log("[overlay] Using conversational response for non-executable query");
-        const convResult = await overlay.getConversationalResponse(userInput);
-        if (convResult.ok && convResult.response) {
-          response = convResult.response;
-        } else {
-          response = convResult.response || "I'm here to help! How can I assist you today?";
-        }
-      } else if (security && plan) {
-        // Validate plan with security
-        const validation = await security.validatePlan(plan, userInput);
-
-        if (!validation.allowed) {
-          response = `I cannot execute that: ${
-            validation.reason || "Security validation failed"
-          }`;
-        } else {
-          // Request consent if needed
-          let approved = true;
-          if (validation.requiresApproval || validation.requiresPin) {
-            const consent = await security.requestConsent(plan, userInput);
-            approved = consent.ok && (consent.approved || false);
-
-            if (!approved) {
-              response = "Action was denied or cancelled.";
-            }
+      // Route based on classification
+      if (classification === "conversational") {
+        // Handle conversationally - skip executor entirely
+        console.log("[overlay] Routing to conversational handler");
+        if (overlay.getConversationalResponse) {
+          const convResult = await overlay.getConversationalResponse(userInput);
+          if (convResult.ok && convResult.response) {
+            response = convResult.response;
+            rawResponse = convResult.rawResponse;
+          } else {
+            response = convResult.response || "I'm here to help! How can I assist you today?";
+            rawResponse = convResult.rawResponse;
           }
-
-          if (approved) {
-            // Execute task
-            const execResult = await security.executeTask(plan, userInput);
-            if (execResult.ok && execResult.success) {
-              const stepsInfo = execResult.executedSteps
-                ? ` (${execResult.executedSteps} steps completed)`
-                : "";
-              response = `✓ Task completed successfully${stepsInfo}: ${plan.task}`;
-            } else {
-              response = `✗ Task execution failed: ${
-                execResult.error || "Unknown error"
-              }`;
-            }
-          }
+        } else {
+          response = "I'm here to help! How can I assist you today?";
         }
       } else {
-        response = "Security service not available";
+        // Handle as executor task - generate plan and execute
+        console.log("[overlay] Routing to executor handler");
+        
+        // Generate task plan using Gemini NLP service
+        if (overlay.generatePlan) {
+          const planResult = await overlay.generatePlan(userInput);
+          if (planResult.ok && planResult.plan) {
+            plan = planResult.plan;
+            rawResponse = planResult.rawResponse;
+            console.log("[overlay] Generated plan:", plan);
+          } else {
+            throw new Error(planResult.reason || "Failed to generate plan");
+          }
+        } else {
+          throw new Error("Plan generation not available");
+        }
+
+        if (security && plan) {
+          // Validate plan with security
+          const validation = await security.validatePlan(plan, userInput);
+
+          if (!validation.allowed) {
+            response = `I cannot execute that: ${
+              validation.reason || "Security validation failed"
+            }`;
+          } else {
+            // Request consent if needed
+            let approved = true;
+            if (validation.requiresApproval || validation.requiresPin) {
+              const consent = await security.requestConsent(plan, userInput);
+              approved = consent.ok && (consent.approved || false);
+
+              if (!approved) {
+                response = "Action was denied or cancelled.";
+              }
+            }
+
+            if (approved) {
+              // Execute task
+              const execResult = await security.executeTask(plan, userInput);
+              if (execResult.ok && execResult.success) {
+                const stepsInfo = execResult.executedSteps
+                  ? ` (${execResult.executedSteps} steps completed)`
+                  : "";
+                response = `✓ Task completed successfully${stepsInfo}: ${plan.task}`;
+              } else {
+                response = `✗ Task execution failed: ${
+                  execResult.error || "Unknown error"
+                }`;
+              }
+            }
+          }
+        } else {
+          response = "Security service not available";
+        }
       }
 
       console.log("[overlay] Response:", response);
@@ -453,80 +470,94 @@ function OverlayApp() {
           return;
         }
 
-        // Generate task plan using Gemini NLP service
+        // First, classify the query to determine if it's executor task or conversational
         let response = "";
         let plan: any = null;
         let rawResponse: string | undefined = undefined;
 
         try {
-          // Get plan from Gemini via IPC
-          if (overlay.generatePlan) {
-            const planResult = await overlay.generatePlan(userInput);
-            if (planResult.ok && planResult.plan) {
-              plan = planResult.plan;
-              rawResponse = planResult.rawResponse;
-              console.log("[overlay] Generated plan:", plan);
-            } else {
-              throw new Error(planResult.reason || "Failed to generate plan");
+          // Classify the query first
+          let classification: "executor" | "conversational" = "executor";
+          if (overlay.classifyQuery) {
+            const classificationResult = await overlay.classifyQuery(userInput);
+            if (classificationResult.ok && classificationResult.classification) {
+              classification = classificationResult.classification;
+              console.log("[overlay] Query classified as:", classification);
             }
-          } else {
-            throw new Error("Plan generation not available");
           }
 
-          // Check if the plan is executable (has real actions beyond just Confirm)
-          let isExecutable = false;
-          if (overlay.isPlanExecutable && plan) {
-            const executableResult = await overlay.isPlanExecutable(plan);
-            isExecutable = executableResult.ok && (executableResult.executable || false);
-            console.log("[overlay] Plan is executable:", isExecutable);
-          }
-
-          // If plan is not executable (e.g., simple questions, greetings), use conversational response
-          if (!isExecutable && overlay.getConversationalResponse) {
-            console.log("[overlay] Using conversational response for non-executable query");
-            const convResult = await overlay.getConversationalResponse(userInput);
-            if (convResult.ok && convResult.response) {
-              response = convResult.response;
-            } else {
-              response = convResult.response || "I'm here to help! How can I assist you today?";
-            }
-          } else if (security && plan) {
-            // Validate plan with security
-            const validation = await security.validatePlan(plan, userInput);
-
-            if (!validation.allowed) {
-              response = `I cannot execute that: ${
-                validation.reason || "Security validation failed"
-              }`;
-            } else {
-              // Request consent if needed
-              let approved = true;
-              if (validation.requiresApproval || validation.requiresPin) {
-                const consent = await security.requestConsent(plan, userInput);
-                approved = consent.ok && (consent.approved || false);
-
-                if (!approved) {
-                  response = "Action was denied or cancelled.";
-                }
+          // Route based on classification
+          if (classification === "conversational") {
+            // Handle conversationally - skip executor entirely
+            console.log("[overlay] Routing to conversational handler");
+            if (overlay.getConversationalResponse) {
+              const convResult = await overlay.getConversationalResponse(userInput);
+              if (convResult.ok && convResult.response) {
+                response = convResult.response;
+                rawResponse = convResult.rawResponse;
+              } else {
+                response = convResult.response || "I'm here to help! How can I assist you today?";
+                rawResponse = convResult.rawResponse;
               }
-
-              if (approved) {
-                // Execute task
-                const execResult = await security.executeTask(plan, userInput);
-                if (execResult.ok && execResult.success) {
-                  const stepsInfo = execResult.executedSteps
-                    ? ` (${execResult.executedSteps} steps completed)`
-                    : "";
-                  response = `✓ Task completed successfully${stepsInfo}: ${plan.task}`;
-                } else {
-                  response = `✗ Task execution failed: ${
-                    execResult.error || "Unknown error"
-                  }`;
-                }
-              }
+            } else {
+              response = "I'm here to help! How can I assist you today?";
             }
           } else {
-            response = "Security service not available";
+            // Handle as executor task - generate plan and execute
+            console.log("[overlay] Routing to executor handler");
+            
+            // Generate task plan using Gemini NLP service
+            if (overlay.generatePlan) {
+              const planResult = await overlay.generatePlan(userInput);
+              if (planResult.ok && planResult.plan) {
+                plan = planResult.plan;
+                rawResponse = planResult.rawResponse;
+                console.log("[overlay] Generated plan:", plan);
+              } else {
+                throw new Error(planResult.reason || "Failed to generate plan");
+              }
+            } else {
+              throw new Error("Plan generation not available");
+            }
+
+            if (security && plan) {
+              // Validate plan with security
+              const validation = await security.validatePlan(plan, userInput);
+
+              if (!validation.allowed) {
+                response = `I cannot execute that: ${
+                  validation.reason || "Security validation failed"
+                }`;
+              } else {
+                // Request consent if needed
+                let approved = true;
+                if (validation.requiresApproval || validation.requiresPin) {
+                  const consent = await security.requestConsent(plan, userInput);
+                  approved = consent.ok && (consent.approved || false);
+
+                  if (!approved) {
+                    response = "Action was denied or cancelled.";
+                  }
+                }
+
+                if (approved) {
+                  // Execute task
+                  const execResult = await security.executeTask(plan, userInput);
+                  if (execResult.ok && execResult.success) {
+                    const stepsInfo = execResult.executedSteps
+                      ? ` (${execResult.executedSteps} steps completed)`
+                      : "";
+                    response = `✓ Task completed successfully${stepsInfo}: ${plan.task}`;
+                  } else {
+                    response = `✗ Task execution failed: ${
+                      execResult.error || "Unknown error"
+                    }`;
+                  }
+                }
+              }
+            } else {
+              response = "Security service not available";
+            }
           }
         } catch (err: any) {
           console.error("[overlay] Error processing task:", err);

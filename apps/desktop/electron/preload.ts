@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('overlay', {
   ttsSpeak: (text: string) => ipcRenderer.invoke('overlay:tts:speak', text),
   expand: () => ipcRenderer.invoke('overlay:expand'),
   collapse: () => ipcRenderer.invoke('overlay:collapse'),
+  classifyQuery: (userInput: string) => ipcRenderer.invoke('nlp:classify-query', userInput),
   generatePlan: (userInput: string) => ipcRenderer.invoke('nlp:generate-plan', userInput),
   isPlanExecutable: (plan: any) => ipcRenderer.invoke('nlp:is-plan-executable', plan),
   getConversationalResponse: (userInput: string) => ipcRenderer.invoke('nlp:conversational-response', userInput),
