@@ -31,7 +31,7 @@ export class GeminiPlannerService {
   /**
    * Generate a task plan from user speech
    */
-  async generateTaskPlan(userInput: string): Promise<TaskPlan> {
+  async generateTaskPlan(userInput: string): Promise<{ plan: TaskPlan; rawResponse: string }> {
     const systemPrompt = this.buildSystemPrompt();
     const fullPrompt = `${systemPrompt}\n\nUSER INSTRUCTION: "${userInput}"\n\nReturn JSON plan:`;
 
@@ -60,19 +60,23 @@ export class GeminiPlannerService {
       }
 
       console.log("[GEMINI] Parsed plan:", JSON.stringify(plan, null, 2));
-      return plan;
+      return { plan, rawResponse: text };
     } catch (error: any) {
       console.error("[GEMINI] Error:", error.message);
       // Return a fallback plan
-      return {
+      const fallbackPlan = {
         task: userInput,
-        risk: "low",
+        risk: "low" as const,
         steps: [
           {
-            op: "Confirm",
+            op: "Confirm" as const,
             text: `I couldn't understand the task: "${userInput}". Please try again.`
           }
         ]
+      };
+      return { 
+        plan: fallbackPlan, 
+        rawResponse: JSON.stringify(fallbackPlan, null, 2) 
       };
     }
   }

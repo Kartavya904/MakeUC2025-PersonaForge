@@ -142,14 +142,28 @@ export default function LandingPage() {
         ))}
       </section>
 
-      <footer className="lp-footer">
-        <div>© {new Date().getFullYear()} PersonaForge</div>
-        <div className="lp-footer-links">
-          <a className="lp-link" onClick={goSettings}>Settings</a>
-          <a className="lp-link" onClick={onPreview}>Preview</a>
-          <a className="lp-link" onClick={() => window.close()}>Quit</a>
+      <section className="lp-powered-by">
+        <div className="lp-powered-by-content">
+          <p className="lp-powered-by-title">Powered by</p>
+          <div className="lp-powered-by-badges">
+            <div className="lp-powered-by-badge">
+              <span className="lp-powered-by-icon">🤖</span>
+              <span className="lp-powered-by-name">Google Gemini</span>
+              <span className="lp-powered-by-desc">AI Planning & NLP</span>
+            </div>
+            <div className="lp-powered-by-badge">
+              <span className="lp-powered-by-icon">🎙️</span>
+              <span className="lp-powered-by-name">ElevenLabs</span>
+              <span className="lp-powered-by-desc">Voice Synthesis</span>
+            </div>
+            <div className="lp-powered-by-badge">
+              <span className="lp-powered-by-icon">🔒</span>
+              <span className="lp-powered-by-name">Security Layers</span>
+              <span className="lp-powered-by-desc">Multi-layer Protection</span>
+            </div>
+          </div>
         </div>
-      </footer>
+      </section>
     </div>
   );
 }

@@ -603,20 +603,24 @@ ipcMain.handle("nlp:generate-plan", async (_e, userInput: string) => {
   try {
     if (!geminiService) {
       // Fallback to simple plan if Gemini is not available
+      const fallbackPlan = generateFallbackPlan(userInput);
       return {
         ok: true,
-        plan: generateFallbackPlan(userInput),
+        plan: fallbackPlan,
+        rawResponse: JSON.stringify(fallbackPlan, null, 2),
       };
     }
 
-    const plan = await geminiService.generateTaskPlan(userInput);
-    return { ok: true, plan };
+    const result = await geminiService.generateTaskPlan(userInput);
+    return { ok: true, plan: result.plan, rawResponse: result.rawResponse };
   } catch (err: any) {
     console.error("[NLP] Error generating plan:", err);
     // Return fallback plan on error
+    const fallbackPlan = generateFallbackPlan(userInput);
     return {
       ok: true,
-      plan: generateFallbackPlan(userInput),
+      plan: fallbackPlan,
+      rawResponse: JSON.stringify(fallbackPlan, null, 2),
     };
   }
 });

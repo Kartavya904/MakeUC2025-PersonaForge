@@ -39,7 +39,7 @@ type OverlayApi = {
   collapse: () => Promise<{ ok: boolean }>;
   generatePlan: (
     userInput: string
-  ) => Promise<{ ok: boolean; plan?: any; reason?: string }>;
+  ) => Promise<{ ok: boolean; plan?: any; rawResponse?: string; reason?: string }>;
   moveWindow: (deltaX: number, deltaY: number) => Promise<{ ok: boolean }>;
   showMainWindow: () => Promise<{ ok: boolean }>;
 };
@@ -91,6 +91,7 @@ type Message = {
   type: "user" | "assistant";
   text: string;
   timestamp: number;
+  rawResponse?: string;
 };
 
 function OverlayApp() {
@@ -102,6 +103,8 @@ function OverlayApp() {
   const [processing, setProcessing] = useState(false);
   const [killSwitchActive, setKillSwitchActive] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [showRawResponse, setShowRawResponse] = useState(false);
+  const [rawResponseData, setRawResponseData] = useState<string>("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -150,12 +153,14 @@ function OverlayApp() {
     try {
       let response = "";
       let plan: any = null;
+      let rawResponse: string | undefined = undefined;
 
       // Generate task plan using Gemini NLP service
       if (overlay.generatePlan) {
         const planResult = await overlay.generatePlan(userInput);
         if (planResult.ok && planResult.plan) {
           plan = planResult.plan;
+          rawResponse = planResult.rawResponse;
           console.log("[overlay] Generated plan:", plan);
         } else {
           throw new Error(planResult.reason || "Failed to generate plan");
@@ -210,6 +215,7 @@ function OverlayApp() {
         type: "assistant",
         text: response,
         timestamp: Date.now(),
+        rawResponse: rawResponse,
       };
       setMessages((prev) => [...prev, assistantMessage]);
 
@@ -427,6 +433,7 @@ function OverlayApp() {
         // Generate task plan using Gemini NLP service
         let response = "";
         let plan: any = null;
+        let rawResponse: string | undefined = undefined;
 
         try {
           // Get plan from Gemini via IPC
@@ -434,6 +441,7 @@ function OverlayApp() {
             const planResult = await overlay.generatePlan(userInput);
             if (planResult.ok && planResult.plan) {
               plan = planResult.plan;
+              rawResponse = planResult.rawResponse;
               console.log("[overlay] Generated plan:", plan);
             } else {
               throw new Error(planResult.reason || "Failed to generate plan");
@@ -492,6 +500,7 @@ function OverlayApp() {
           type: "assistant",
           text: response,
           timestamp: Date.now(),
+          rawResponse: rawResponse,
         };
         setMessages((prev) => [...prev, assistantMessage]);
 
@@ -555,6 +564,22 @@ function OverlayApp() {
     }
   };
 
+  const handleShowRawResponse = () => {
+    // Find the most recent assistant message with a raw response
+    const lastMessageWithRaw = [...messages]
+      .reverse()
+      .find((msg) => msg.type === "assistant" && msg.rawResponse);
+    
+    if (lastMessageWithRaw?.rawResponse) {
+      setRawResponseData(lastMessageWithRaw.rawResponse);
+      setShowRawResponse(true);
+    } else {
+      // Try to format the last plan as JSON if available
+      setRawResponseData("No raw response available");
+      setShowRawResponse(true);
+    }
+  };
+
   const handleCollapse = async () => {
     if (!overlay) return;
     if (listening) await stopRecording();
@@ -602,6 +627,25 @@ function OverlayApp() {
       <div className="overlay-header">
         <h3>PersonaForge Assistant</h3>
         <div className="overlay-header-actions">
+          <button
+            className="overlay-raw-response"
+            onClick={handleShowRawResponse}
+            title="Show raw JSON response"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="16 18 22 12 16 6" />
+              <polyline points="8 6 2 12 8 18" />
+            </svg>
+          </button>
           <button
             className="overlay-settings"
             onClick={handleOpenSettings}
@@ -731,6 +775,22 @@ function OverlayApp() {
           </div>
         )}
       </div>
+
+      {showRawResponse && (
+        <div className="overlay-modal-backdrop" onClick={() => setShowRawResponse(false)}>
+          <div className="overlay-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="overlay-modal-header">
+              <h3>Raw Gemini API Response</h3>
+              <button className="overlay-modal-close" onClick={() => setShowRawResponse(false)}>
+                ×
+              </button>
+            </div>
+            <div className="overlay-modal-content">
+              <pre className="overlay-json-viewer">{rawResponseData}</pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

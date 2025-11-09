@@ -429,3 +429,117 @@
 .overlay-messages::-webkit-scrollbar-thumb:hover {
   background: var(--overlay-muted);
 }
+
+.overlay-raw-response {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--overlay-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-family: monospace;
+}
+
+.overlay-raw-response:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--overlay-fg);
+}
+
+.overlay-raw-response span {
+  color: var(--overlay-muted);
+}
+
+.overlay-raw-response:hover span {
+  color: var(--overlay-fg);
+}
+
+.overlay-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 20px;
+}
+
+.overlay-modal {
+  background: var(--overlay-bg);
+  border: 1px solid var(--overlay-border);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(20px);
+  max-width: 90vw;
+  max-height: 90vh;
+  width: 600px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.overlay-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  background: var(--overlay-bg-glass);
+  border-bottom: 1px solid var(--overlay-border);
+}
+
+.overlay-modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--overlay-fg);
+}
+
+.overlay-modal-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--overlay-muted);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.overlay-modal-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--overlay-fg);
+}
+
+.overlay-modal-content {
+  flex: 1;
+  overflow: auto;
+  padding: 20px;
+}
+
+.overlay-json-viewer {
+  margin: 0;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--overlay-border);
+  border-radius: 8px;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--overlay-fg);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-x: auto;
+  max-height: 60vh;
+}
