@@ -1,4 +1,4 @@
-// Audio worklet processor for capturing microphone audio
+// Simple audio worklet processor for capturing microphone audio
 class AudioProcessor extends AudioWorkletProcessor {
   constructor() {
     super();

@@ -28,10 +28,13 @@ function OverlayApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [listening, setListening] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [wakeWordActive, setWakeWordActive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const wakeWordIntervalRef = useRef<number | null>(null);
+  const recordingTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -39,20 +42,128 @@ function OverlayApp() {
     }
   }, [messages]);
 
+  // Start wake word detection when overlay is created (collapsed state)
+  useEffect(() => {
+    if (!expanded && overlay && !wakeWordActive) {
+      startWakeWordDetection();
+    }
+    return () => {
+      stopWakeWordDetection();
+    };
+  }, [expanded, overlay]);
+
   const handleClick = async () => {
-    if (!overlay) return;
-    
-    if (!expanded) {
-      // Expand the overlay
-      await overlay.expand();
-      setExpanded(true);
-    } else if (!listening && !processing) {
-      // Start listening
-      await startListening();
+    // Only allow click to collapse when expanded
+    if (expanded && !listening && !processing) {
+      await handleCollapse();
     }
   };
 
-  const startListening = async () => {
+  const startWakeWordDetection = async () => {
+    if (!overlay || wakeWordActive || expanded) return;
+
+    try {
+      setWakeWordActive(true);
+      
+      // Request microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+
+      // Create audio context for wake word detection
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
+
+      // Simple audio processing (no VAD needed for wake word)
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      
+      processor.onaudioprocess = (e) => {
+        if (expanded) return; // Don't process if expanded
+        const inputData = e.inputBuffer.getChannelData(0);
+        const int16 = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          int16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+        }
+        overlay.sttPush(int16.buffer);
+      };
+      
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+      workletNodeRef.current = processor as any;
+
+      // Start STT for wake word detection
+      await overlay.sttStart();
+
+      // Check for wake word every 1 second
+      wakeWordIntervalRef.current = window.setInterval(async () => {
+        if (expanded) return; // Don't check if already expanded
+
+        try {
+          const result = await overlay.sttStop();
+          
+          if (result.ok && result.text) {
+            const text = result.text.toLowerCase().trim();
+            console.log('[wake-word] Checking:', text);
+            
+            if (text.includes('chad')) {
+              console.log('[wake-word] Detected! Expanding and starting recording...');
+              stopWakeWordDetection();
+              // Expand overlay and start recording
+              await overlay.expand();
+              setExpanded(true);
+              // Small delay then start recording
+              setTimeout(() => {
+                startRecording();
+              }, 300);
+              return;
+            }
+          }
+
+          // Restart listening
+          await overlay.sttStart();
+        } catch (err: any) {
+          console.error('[wake-word] Error:', err);
+          try {
+            await overlay.sttStart();
+          } catch (e) {
+            stopWakeWordDetection();
+          }
+        }
+      }, 1000);
+
+    } catch (err: any) {
+      console.error('[overlay] Failed to start wake word detection:', err);
+      setWakeWordActive(false);
+    }
+  };
+
+  const stopWakeWordDetection = async () => {
+    if (wakeWordIntervalRef.current !== null) {
+      clearInterval(wakeWordIntervalRef.current);
+      wakeWordIntervalRef.current = null;
+    }
+
+    if (mediaStreamRef.current && !expanded) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+
+    if (audioContextRef.current && !expanded) {
+      await audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    workletNodeRef.current = null;
+
+    try {
+      await overlay?.sttStop();
+    } catch (e) {
+      // Ignore errors
+    }
+
+    setWakeWordActive(false);
+  };
+
+  const startRecording = async () => {
     if (!overlay || listening || processing) return;
 
     try {
@@ -66,53 +177,48 @@ function OverlayApp() {
       const audioContext = new AudioContext({ sampleRate: 16000 });
       audioContextRef.current = audioContext;
 
-      // Load audio worklet for processing
-      try {
-        // Try to load worklet from public directory
-        const workletUrl = new URL('/audio-processor.js', window.location.origin).href;
-        await audioContext.audioWorklet.addModule(workletUrl);
-        const source = audioContext.createMediaStreamSource(stream);
-        const workletNode = new AudioWorkletNode(audioContext, 'audio-processor');
-        
-        workletNode.port.onmessage = (e) => {
-          if (e.data) {
-            overlay.sttPush(e.data);
-          }
-        };
-        
-        source.connect(workletNode);
-        workletNodeRef.current = workletNode;
-      } catch (err) {
-        console.error('[overlay] Failed to load worklet, using fallback:', err);
-        // Fallback: use ScriptProcessorNode (deprecated but works)
-        const source = audioContext.createMediaStreamSource(stream);
-        const processor = audioContext.createScriptProcessor(4096, 1, 1);
-        
-        processor.onaudioprocess = (e) => {
-          const inputData = e.inputBuffer.getChannelData(0);
-          const int16 = new Int16Array(inputData.length);
-          for (let i = 0; i < inputData.length; i++) {
-            int16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-          }
-          overlay.sttPush(int16.buffer);
-        };
-        
-        source.connect(processor);
-        processor.connect(audioContext.destination);
-        workletNodeRef.current = processor as any;
-      }
+      // Simple audio processing
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      
+      processor.onaudioprocess = (e) => {
+        const inputData = e.inputBuffer.getChannelData(0);
+        const int16 = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          int16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+        }
+        overlay.sttPush(int16.buffer);
+      };
+      
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+      workletNodeRef.current = processor as any;
 
       // Start STT
       await overlay.sttStart();
+
+      // Auto-stop after 6 seconds
+      recordingTimeoutRef.current = window.setTimeout(async () => {
+        if (listening) {
+          console.log('[recording] Auto-stopping after 6 seconds');
+          await stopRecording();
+        }
+      }, 6000);
+
     } catch (err: any) {
-      console.error('[overlay] Failed to start listening:', err);
-      alert(`Failed to start listening: ${err.message}`);
+      console.error('[overlay] Failed to start recording:', err);
       setListening(false);
     }
   };
 
-  const stopListening = async () => {
+  const stopRecording = async () => {
     if (!overlay || !listening) return;
+
+    // Clear timeout
+    if (recordingTimeoutRef.current !== null) {
+      clearTimeout(recordingTimeoutRef.current);
+      recordingTimeoutRef.current = null;
+    }
 
     try {
       setListening(false);
@@ -132,9 +238,11 @@ function OverlayApp() {
       workletNodeRef.current = null;
 
       // Stop STT and get transcription
+      console.log('[recording] Stopping and transcribing...');
       const result = await overlay.sttStop();
       
       if (result.ok && result.text) {
+        console.log('[recording] Transcribed:', result.text);
         const userMessage: Message = {
           id: Date.now().toString(),
           type: 'user',
@@ -143,8 +251,9 @@ function OverlayApp() {
         };
         setMessages(prev => [...prev, userMessage]);
 
-        // Generate dummy response for now
+        // Generate dummy response
         const response = generateDummyResponse(result.text);
+        console.log('[recording] Response:', response);
         
         const assistantMessage: Message = {
           id: (Date.now() + 1).toString(),
@@ -156,16 +265,24 @@ function OverlayApp() {
 
         // Speak the response
         await speakText(response);
-      } else {
-        alert(`Failed to transcribe: ${result.reason || 'Unknown error'}`);
       }
+
+      // Collapse back to small icon and restart wake word detection
+      setTimeout(async () => {
+        await overlay.collapse();
+        setExpanded(false);
+        setTimeout(() => {
+          startWakeWordDetection();
+        }, 500);
+      }, 2000);
+
     } catch (err: any) {
-      console.error('[overlay] Failed to stop listening:', err);
-      alert(`Error: ${err.message}`);
+      console.error('[overlay] Failed to stop recording:', err);
     } finally {
       setProcessing(false);
     }
   };
+
 
   const generateDummyResponse = (input: string): string => {
     // Simple dummy responses for now
@@ -205,9 +322,12 @@ function OverlayApp() {
 
   const handleCollapse = async () => {
     if (!overlay) return;
-    if (listening) await stopListening();
+    if (listening) await stopRecording();
     await overlay.collapse();
     setExpanded(false);
+    setTimeout(() => {
+      startWakeWordDetection();
+    }, 500);
   };
 
   if (!overlay) {
@@ -241,9 +361,9 @@ function OverlayApp() {
       </div>
       
       <div className="overlay-messages">
-        {messages.length === 0 && (
+        {messages.length === 0 && !listening && !processing && (
           <div className="overlay-empty">
-            <p>Click the microphone to start a conversation</p>
+            <p>Say "Chad" to activate</p>
           </div>
         )}
         {messages.map(msg => (
@@ -258,27 +378,23 @@ function OverlayApp() {
       </div>
 
       <div className="overlay-controls">
-        {!listening && !processing && (
-          <button className="overlay-mic-btn" onClick={startListening}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-              <line x1="12" y1="18" x2="12" y2="22"/>
-              <line x1="8" y1="22" x2="16" y2="22"/>
-            </svg>
-            Start Listening
-          </button>
-        )}
         {listening && (
-          <button className="overlay-mic-btn overlay-mic-btn-active" onClick={stopListening}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="6" width="12" height="12" rx="2"/>
-            </svg>
-            Stop Listening
-          </button>
+          <div className="overlay-listening-status">
+            <div className="overlay-listening-indicator"></div>
+            <span>Recording... (auto-stops in 6 seconds)</span>
+            <button 
+              className="overlay-stop-btn" 
+              onClick={async () => {
+                console.log('[user] Stop recording clicked');
+                await stopRecording();
+              }}
+            >
+              Stop Recording
+            </button>
+          </div>
         )}
         {processing && (
-          <div className="overlay-processing">Processing...</div>
+          <div className="overlay-processing">Processing your request...</div>
         )}
       </div>
     </div>
