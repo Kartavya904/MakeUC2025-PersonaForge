@@ -90,6 +90,33 @@
   color: var(--overlay-fg);
 }
 
+.overlay-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.overlay-settings {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--overlay-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.overlay-settings:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--overlay-fg);
+}
+
 .overlay-close {
   width: 24px;
   height: 24px;
@@ -291,6 +318,53 @@
   border-top-color: var(--overlay-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+.overlay-speaking-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 24px;
+  width: 100%;
+}
+
+.overlay-speaking-text {
+  color: var(--overlay-accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.overlay-speaking-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--overlay-accent);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.overlay-stop-speak-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #ff6b6b, #ff8787);
+  color: white;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.overlay-stop-speak-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 107, 107, 0.4);
+}
+
+.overlay-stop-speak-btn:active {
+  transform: translateY(0);
 }
 
 @keyframes spin {

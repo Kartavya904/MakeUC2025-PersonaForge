@@ -41,6 +41,7 @@ type OverlayApi = {
     userInput: string
   ) => Promise<{ ok: boolean; plan?: any; reason?: string }>;
   moveWindow: (deltaX: number, deltaY: number) => Promise<{ ok: boolean }>;
+  showMainWindow: () => Promise<{ ok: boolean }>;
 };
 
 type SecurityApi = {
@@ -100,10 +101,12 @@ function OverlayApp() {
   const [listening, setListening] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [killSwitchActive, setKillSwitchActive] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Drag state
   const dragStateRef = useRef<{
@@ -517,17 +520,45 @@ function OverlayApp() {
         const blob = new Blob([bytes], { type: result.mime || "audio/mpeg" });
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
+        currentAudioRef.current = audio;
+        setSpeaking(true);
         await audio.play();
-        audio.onended = () => URL.revokeObjectURL(url);
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          currentAudioRef.current = null;
+          setSpeaking(false);
+        };
+        audio.onerror = () => {
+          URL.revokeObjectURL(url);
+          currentAudioRef.current = null;
+          setSpeaking(false);
+        };
       }
     } catch (err: any) {
       console.error("[overlay] Failed to speak:", err);
+      setSpeaking(false);
+    }
+  };
+
+  const stopSpeaking = () => {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current.currentTime = 0;
+      currentAudioRef.current = null;
+      setSpeaking(false);
+    }
+  };
+
+  const handleOpenSettings = async () => {
+    if (overlay) {
+      await overlay.showMainWindow();
     }
   };
 
   const handleCollapse = async () => {
     if (!overlay) return;
     if (listening) await stopRecording();
+    stopSpeaking(); // Stop speaking when closing
     await overlay.collapse();
     setExpanded(false);
   };
@@ -570,9 +601,30 @@ function OverlayApp() {
     <div className="overlay-root overlay-expanded">
       <div className="overlay-header">
         <h3>PersonaForge Assistant</h3>
-        <button className="overlay-close" onClick={handleCollapse}>
-          ×
-        </button>
+        <div className="overlay-header-actions">
+          <button
+            className="overlay-settings"
+            onClick={handleOpenSettings}
+            title="Settings"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+          <button className="overlay-close" onClick={handleCollapse}>
+            ×
+          </button>
+        </div>
       </div>
 
       <div className="overlay-messages">
@@ -659,6 +711,23 @@ function OverlayApp() {
           <div className="overlay-processing">
             <div className="overlay-processing-spinner"></div>
             <span>Processing your request...</span>
+          </div>
+        )}
+        {speaking && (
+          <div className="overlay-speaking-controls">
+            <div className="overlay-speaking-indicator"></div>
+            <span className="overlay-speaking-text">Speaking...</span>
+            <button className="overlay-stop-speak-btn" onClick={stopSpeaking}>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+              </svg>
+              Stop
+            </button>
           </div>
         )}
       </div>
