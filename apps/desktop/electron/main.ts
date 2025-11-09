@@ -185,16 +185,25 @@ function createWindow() {
       ? path.join(__dirname, 'icon.icns') // optional, for mac dev
       : path.join(__dirname, 'icon.png'); // optional, for linux dev
 
+  // Get primary display info for DPI scaling
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const scaleFactor = primaryDisplay.scaleFactor;
+  
+  // Base resolution: 1920x1080 (1080p)
+  const baseWidth = 1920;
+  const baseHeight = 1080;
+
   win = new BrowserWindow({
-    width: 1140,
-    height: 760,
+    width: baseWidth,
+    height: baseHeight,
     icon: iconPath,
     show,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'), // built as CJS
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      zoomFactor: 1.0 / scaleFactor // Adjust zoom to compensate for DPI scaling
     }
   });
 
