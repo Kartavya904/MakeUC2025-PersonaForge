@@ -15,6 +15,9 @@ declare global {
       // TTS methods
       ttsSpeak: (text: string) => Promise<void>;
       
+      // Plan execution
+      executePlan: (plan: any) => Promise<any>;
+      
       // Event listeners
       on: (channel: string, callback: (data: any) => void) => UnsubscribeFn;
       
