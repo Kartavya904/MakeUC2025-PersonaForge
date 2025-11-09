@@ -315,33 +315,61 @@ function OverlayApp() {
     if (expanded) return; // Only allow dragging when collapsed
 
     dragStateRef.current.isDragging = false;
-    dragStateRef.current.startX = e.clientX;
-    dragStateRef.current.startY = e.clientY;
+    // Use screen coordinates for smoother tracking
+    dragStateRef.current.startX = e.screenX;
+    dragStateRef.current.startY = e.screenY;
 
-    const handleMouseMove = async (moveEvent: MouseEvent) => {
+    let animationFrameId: number | null = null;
+    let pendingMove = false;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
       if (!overlay) return;
 
-      const deltaX = moveEvent.clientX - dragStateRef.current.startX;
-      const deltaY = moveEvent.clientY - dragStateRef.current.startY;
+      const deltaX = moveEvent.screenX - dragStateRef.current.startX;
+      const deltaY = moveEvent.screenY - dragStateRef.current.startY;
 
-      // Start dragging if mouse moved more than 5 pixels
+      // Start dragging if mouse moved more than 3 pixels
       if (
         !dragStateRef.current.isDragging &&
-        (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5)
+        (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)
       ) {
         dragStateRef.current.isDragging = true;
       }
 
       if (dragStateRef.current.isDragging) {
-        await overlay.moveWindow(deltaX, deltaY);
-        dragStateRef.current.startX = moveEvent.clientX;
-        dragStateRef.current.startY = moveEvent.clientY;
+        // Use requestAnimationFrame for smooth updates
+        if (!pendingMove) {
+          pendingMove = true;
+          animationFrameId = requestAnimationFrame(async () => {
+            pendingMove = false;
+            if (overlay && dragStateRef.current.isDragging) {
+              await overlay.moveWindow(deltaX, deltaY);
+              dragStateRef.current.startX = moveEvent.screenX;
+              dragStateRef.current.startY = moveEvent.screenY;
+            }
+          });
+        }
       }
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = async () => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
+
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
+
+      // Notify main process that dragging has ended
+      if (dragStateRef.current.isDragging && overlay) {
+        // Reset drag state in main process
+        // This will allow size corrections if needed
+        try {
+          await (overlay as any).endDrag?.();
+        } catch (e) {
+          // Ignore if method doesn't exist
+        }
+      }
 
       // Small delay to distinguish between drag and click
       setTimeout(() => {
@@ -349,7 +377,7 @@ function OverlayApp() {
       }, 100);
     };
 
-    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mousemove", handleMouseMove, { passive: true });
     document.addEventListener("mouseup", handleMouseUp);
   };
 

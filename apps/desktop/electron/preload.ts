@@ -20,7 +20,8 @@ contextBridge.exposeInMainWorld('overlay', {
   expand: () => ipcRenderer.invoke('overlay:expand'),
   collapse: () => ipcRenderer.invoke('overlay:collapse'),
   generatePlan: (userInput: string) => ipcRenderer.invoke('nlp:generate-plan', userInput),
-  moveWindow: (deltaX: number, deltaY: number) => ipcRenderer.invoke('overlay:move-window', deltaX, deltaY)
+  moveWindow: (deltaX: number, deltaY: number) => ipcRenderer.invoke('overlay:move-window', deltaX, deltaY),
+  endDrag: () => ipcRenderer.invoke('overlay:end-drag')
 });
 
 // Security API

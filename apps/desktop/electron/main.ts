@@ -331,16 +331,36 @@ function createOverlayWindow() {
   // Make window draggable
   overlayWin.setIgnoreMouseEvents(false);
 
-  // Prevent any size changes when collapsed (80x80)
+  // Strictly enforce 80x80 size when collapsed - check on every resize event
   overlayWin.on('resize', () => {
     if (!overlayWin) return;
     const [w, h] = overlayWin.getSize();
-    // If window is close to 80x80 (collapsed state), force it back
-    if (Math.abs(w - 80) < 5 && Math.abs(h - 80) < 5 && (w !== 80 || h !== 80)) {
+    // If window is collapsed (approximately 80x80), strictly enforce 80x80
+    const isCollapsed = Math.abs(w - 80) < 10 && Math.abs(h - 80) < 10;
+    if (isCollapsed && (w !== 80 || h !== 80)) {
+      // Immediately enforce size - no debounce to prevent overflow
       overlayWin.setResizable(false);
+      overlayWin.setMinimumSize(80, 80);
+      overlayWin.setMaximumSize(80, 80);
       overlayWin.setSize(80, 80);
     }
   });
+  
+  // Also enforce size periodically when collapsed (as a safety measure)
+  const sizeCheckInterval = setInterval(() => {
+    if (!overlayWin) {
+      clearInterval(sizeCheckInterval);
+      return;
+    }
+    const [w, h] = overlayWin.getSize();
+    const isCollapsed = Math.abs(w - 80) < 10 && Math.abs(h - 80) < 10;
+    if (isCollapsed && (w !== 80 || h !== 80)) {
+      overlayWin.setResizable(false);
+      overlayWin.setMinimumSize(80, 80);
+      overlayWin.setMaximumSize(80, 80);
+      overlayWin.setSize(80, 80);
+    }
+  }, 100); // Check every 100ms
 
   overlayWin.on('closed', () => {
     overlayWin = null;
@@ -638,34 +658,76 @@ ipcMain.handle('overlay:collapse', async () => {
   const newX = Math.min(x + (w - newWidth) / 2, width - newWidth - 20);
   const newY = Math.max(20, y);
   
+  // Strictly enforce 80x80 size
+  overlayWin.setResizable(false);
+  overlayWin.setMinimumSize(80, 80);
+  overlayWin.setMaximumSize(80, 80);
   overlayWin.setSize(newWidth, newHeight);
   overlayWin.setPosition(Math.round(newX), Math.round(newY));
-  overlayWin.setResizable(false);
+  
   return { ok: true };
 });
 
+// Track if we're currently dragging to prevent size changes
+let isDraggingOverlay = false;
+let dragStartSize: [number, number] | null = null;
+
 ipcMain.handle('overlay:move-window', async (_e, deltaX: number, deltaY: number) => {
   if (!overlayWin) return { ok: false };
+  
   const [x, y] = overlayWin.getPosition();
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width, height } = primaryDisplay.workAreaSize;
   const [w, h] = overlayWin.getSize();
   
-  // If window is collapsed (approximately 80x80), lock it to exactly 80x80
+  // Check if window is collapsed (approximately 80x80)
   const isCollapsed = Math.abs(w - 80) < 10 && Math.abs(h - 80) < 10;
-  const targetSize = isCollapsed ? 80 : w;
   
-  // Force non-resizable when collapsed
-  if (isCollapsed) {
+  // On first drag move, lock the size to prevent overflow
+  if (!isDraggingOverlay && isCollapsed) {
+    isDraggingOverlay = true;
+    dragStartSize = [w, h];
+    // Strictly lock size to 80x80
+    overlayWin.setMinimumSize(80, 80);
+    overlayWin.setMaximumSize(80, 80);
     overlayWin.setResizable(false);
     overlayWin.setSize(80, 80);
   }
   
-  // Calculate new position with bounds checking using target size
+  // During drag, strictly enforce 80x80 if collapsed
+  if (isDraggingOverlay && isCollapsed) {
+    if (w !== 80 || h !== 80) {
+      overlayWin.setSize(80, 80);
+    }
+  }
+  
+  const targetSize = isCollapsed ? 80 : w;
+  
+  // Only move the position for smooth dragging
   const newX = Math.max(0, Math.min(x + deltaX, width - targetSize));
   const newY = Math.max(0, Math.min(y + deltaY, height - targetSize));
   
-  overlayWin.setPosition(Math.round(newX), Math.round(newY));
+  // Use setPosition without rounding for smoother movement
+  overlayWin.setPosition(newX, newY);
+  
+  return { ok: true };
+});
+
+ipcMain.handle('overlay:end-drag', async () => {
+  if (!overlayWin) return { ok: false };
+  
+  isDraggingOverlay = false;
+  dragStartSize = null;
+  
+  // Ensure size is correct after drag ends
+  const [w, h] = overlayWin.getSize();
+  const isCollapsed = Math.abs(w - 80) < 10 && Math.abs(h - 80) < 10;
+  
+  if (isCollapsed && (w !== 80 || h !== 80)) {
+    overlayWin.setSize(80, 80);
+    overlayWin.setResizable(false);
+  }
+  
   return { ok: true };
 });
 
@@ -780,3 +842,4 @@ app.on('before-quit', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
+
