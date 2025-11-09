@@ -116,13 +116,6 @@ function OverlayApp() {
     startY: 0,
   });
 
-  // Wake word detection state
-  const wakeWordRecognitionRef = useRef<SpeechRecognition | null>(null);
-  const wakeWordStreamRef = useRef<MediaStream | null>(null);
-  const wakeWordActiveRef = useRef<boolean>(false);
-  const WAKE_WORD = "jarvis";
-  const LISTEN_TIMEOUT = 10000; // 10 seconds timeout for listening after wake word
-
   // Check kill switch status on mount and periodically
   useEffect(() => {
     if (!security) return;
@@ -145,158 +138,93 @@ function OverlayApp() {
     }
   }, [messages]);
 
-  const handleWakeWordActivated = async () => {
-    if (!overlay || expanded) return;
+  // Process command (extracted from stopRecording logic)
+  const processCommand = async (userInput: string) => {
+    if (!overlay) return;
 
-    // Stop wake word recognition
-    if (wakeWordRecognitionRef.current) {
-      try {
-        wakeWordRecognitionRef.current.stop();
-      } catch (e) {
-        // Ignore errors
-      }
-    }
+    setProcessing(true);
 
-    // Expand overlay
-    await overlay.expand();
-    setExpanded(true);
+    try {
+      let response = "";
+      let plan: any = null;
 
-    // Start recording automatically
-    setTimeout(() => {
-      startRecording();
-    }, 300);
-
-    // Reset wake word active flag after timeout
-    setTimeout(() => {
-      wakeWordActiveRef.current = false;
-    }, LISTEN_TIMEOUT);
-  };
-
-  // Store handleWakeWordActivated in a ref to avoid dependency issues
-  const handleWakeWordActivatedRef = useRef(handleWakeWordActivated);
-  useEffect(() => {
-    handleWakeWordActivatedRef.current = handleWakeWordActivated;
-  }, [overlay, expanded]);
-
-  // Initialize wake word detection
-  useEffect(() => {
-    if (!overlay || expanded) return;
-
-    const startWakeWordDetection = async () => {
-      // Check if SpeechRecognition is available
-      const SpeechRecognitionClass =
-        window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SpeechRecognitionClass) {
-        console.warn(
-          "[overlay] SpeechRecognition not available, wake word detection disabled"
-        );
-        return;
+      // Generate task plan using Gemini NLP service
+      if (overlay.generatePlan) {
+        const planResult = await overlay.generatePlan(userInput);
+        if (planResult.ok && planResult.plan) {
+          plan = planResult.plan;
+          console.log("[overlay] Generated plan:", plan);
+        } else {
+          throw new Error(planResult.reason || "Failed to generate plan");
+        }
+      } else {
+        throw new Error("Plan generation not available");
       }
 
-      try {
-        const recognition = new SpeechRecognitionClass();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = "en-US";
+      if (security && plan) {
+        // Validate plan with security
+        const validation = await security.validatePlan(plan, userInput);
 
-        recognition.onresult = (event: any) => {
-          if (wakeWordActiveRef.current || expanded) return;
+        if (!validation.allowed) {
+          response = `I cannot execute that: ${
+            validation.reason || "Security validation failed"
+          }`;
+        } else {
+          // Request consent if needed
+          let approved = true;
+          if (validation.requiresApproval || validation.requiresPin) {
+            const consent = await security.requestConsent(plan, userInput);
+            approved = consent.ok && (consent.approved || false);
 
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            const transcript = event.results[i][0].transcript
-              .toLowerCase()
-              .trim();
-
-            // Check if wake word is detected
-            if (transcript.includes(WAKE_WORD)) {
-              console.log("[wake-word] Detected:", transcript);
-              wakeWordActiveRef.current = true;
-
-              // Stop wake word recognition temporarily
-              recognition.stop();
-
-              // Expand overlay and start recording
-              handleWakeWordActivatedRef.current();
-              return;
+            if (!approved) {
+              response = "Action was denied or cancelled.";
             }
           }
-        };
 
-        recognition.onerror = (event: any) => {
-          console.error("[wake-word] Recognition error:", event.error);
-          // Restart recognition after a short delay if not a fatal error
-          if (
-            event.error !== "no-speech" &&
-            event.error !== "aborted" &&
-            !wakeWordActiveRef.current
-          ) {
-            setTimeout(() => {
-              if (!wakeWordActiveRef.current && !expanded) {
-                try {
-                  recognition.start();
-                } catch (e) {
-                  console.error("[wake-word] Failed to restart:", e);
-                }
-              }
-            }, 1000);
+          if (approved) {
+            // Execute task
+            const execResult = await security.executeTask(plan, userInput);
+            if (execResult.ok && execResult.success) {
+              const stepsInfo = execResult.executedSteps
+                ? ` (${execResult.executedSteps} steps completed)`
+                : "";
+              response = `✓ Task completed successfully${stepsInfo}: ${plan.task}`;
+            } else {
+              response = `✗ Task execution failed: ${
+                execResult.error || "Unknown error"
+              }`;
+            }
           }
-        };
-
-        recognition.onend = () => {
-          // Restart recognition if we're still in collapsed state and wake word is not active
-          if (!wakeWordActiveRef.current && !expanded) {
-            setTimeout(() => {
-              if (!wakeWordActiveRef.current && !expanded) {
-                try {
-                  recognition.start();
-                } catch (e) {
-                  // Ignore errors when restarting
-                }
-              }
-            }, 500);
-          }
-        };
-
-        wakeWordRecognitionRef.current = recognition;
-
-        // Request microphone access for wake word detection
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-          });
-          wakeWordStreamRef.current = stream;
-          recognition.start();
-          console.log("[wake-word] Wake word detection started");
-        } catch (err) {
-          console.error("[wake-word] Failed to get microphone access:", err);
         }
-      } catch (err) {
-        console.error(
-          "[wake-word] Failed to initialize wake word detection:",
-          err
-        );
+      } else {
+        response = "Security service not available";
       }
-    };
 
-    startWakeWordDetection();
+      console.log("[overlay] Response:", response);
 
-    return () => {
-      // Cleanup wake word detection
-      if (wakeWordRecognitionRef.current) {
-        try {
-          wakeWordRecognitionRef.current.stop();
-        } catch (e) {
-          // Ignore errors
-        }
-        wakeWordRecognitionRef.current = null;
-      }
-      if (wakeWordStreamRef.current) {
-        wakeWordStreamRef.current.getTracks().forEach((track) => track.stop());
-        wakeWordStreamRef.current = null;
-      }
-      wakeWordActiveRef.current = false;
-    };
-  }, [overlay, expanded]);
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: "assistant",
+        text: response,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+
+      // Speak the response
+      await speakText(response);
+    } catch (err: any) {
+      console.error("[overlay] Error processing command:", err);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        type: "assistant",
+        text: `✗ Error: ${err?.message || "Unknown error"}`,
+        timestamp: Date.now(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   const handleIconClick = async (e: React.MouseEvent) => {
     // Only expand on click if not dragging
@@ -387,16 +315,37 @@ function OverlayApp() {
     try {
       setListening(true);
 
-      // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Request microphone access with noise suppression and echo cancellation
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 16000,
+          channelCount: 1,
+        },
+      });
       mediaStreamRef.current = stream;
 
       // Create audio context
       const audioContext = new AudioContext({ sampleRate: 16000 });
       audioContextRef.current = audioContext;
 
-      // Simple audio processing
+      // Create audio processing chain with filters
       const source = audioContext.createMediaStreamSource(stream);
+
+      // High-pass filter to reduce low-frequency noise (below 80Hz)
+      const highPassFilter = audioContext.createBiquadFilter();
+      highPassFilter.type = "highpass";
+      highPassFilter.frequency.value = 80;
+      highPassFilter.Q.value = 1;
+
+      // Low-pass filter to reduce high-frequency noise (above 8000Hz)
+      const lowPassFilter = audioContext.createBiquadFilter();
+      lowPassFilter.type = "lowpass";
+      lowPassFilter.frequency.value = 8000;
+      lowPassFilter.Q.value = 1;
+
       const processor = audioContext.createScriptProcessor(4096, 1, 1);
 
       processor.onaudioprocess = (e) => {
@@ -408,7 +357,10 @@ function OverlayApp() {
         overlay.sttPush(int16.buffer);
       };
 
-      source.connect(processor);
+      // Connect audio processing chain: source -> highpass -> lowpass -> processor -> destination
+      source.connect(highPassFilter);
+      highPassFilter.connect(lowPassFilter);
+      lowPassFilter.connect(processor);
       processor.connect(audioContext.destination);
       workletNodeRef.current = processor as any;
 
@@ -578,8 +530,6 @@ function OverlayApp() {
     if (listening) await stopRecording();
     await overlay.collapse();
     setExpanded(false);
-    // Reset wake word active flag so detection can restart
-    wakeWordActiveRef.current = false;
   };
 
   if (!overlay) {
