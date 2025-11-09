@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('overlay', {
   expand: () => ipcRenderer.invoke('overlay:expand'),
   collapse: () => ipcRenderer.invoke('overlay:collapse'),
   generatePlan: (userInput: string) => ipcRenderer.invoke('nlp:generate-plan', userInput),
+  isPlanExecutable: (plan: any) => ipcRenderer.invoke('nlp:is-plan-executable', plan),
+  getConversationalResponse: (userInput: string) => ipcRenderer.invoke('nlp:conversational-response', userInput),
   moveWindow: (deltaX: number, deltaY: number) => ipcRenderer.invoke('overlay:move-window', deltaX, deltaY),
   endDrag: () => ipcRenderer.invoke('overlay:end-drag'),
   showMainWindow: () => ipcRenderer.invoke('overlay:show-main-window')

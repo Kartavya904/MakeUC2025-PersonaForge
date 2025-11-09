@@ -625,6 +625,43 @@ ipcMain.handle("nlp:generate-plan", async (_e, userInput: string) => {
   }
 });
 
+ipcMain.handle("nlp:conversational-response", async (_e, userInput: string) => {
+  try {
+    if (!geminiService) {
+      return {
+        ok: false,
+        reason: "Gemini service not available",
+        response: "I'm here to help! How can I assist you today?",
+      };
+    }
+
+    const response = await geminiService.generateConversationalResponse(userInput);
+    return { ok: true, response };
+  } catch (err: any) {
+    console.error("[NLP] Error generating conversational response:", err);
+    return {
+      ok: false,
+      reason: err?.message || "Unknown error",
+      response: "I'm here to help! How can I assist you today?",
+    };
+  }
+});
+
+ipcMain.handle("nlp:is-plan-executable", async (_e, plan: any) => {
+  try {
+    if (!geminiService) {
+      // If no service, assume plan is executable if it has steps
+      return { ok: true, executable: plan?.steps?.length > 0 };
+    }
+
+    const executable = geminiService.isPlanExecutable(plan);
+    return { ok: true, executable };
+  } catch (err: any) {
+    console.error("[NLP] Error checking plan executability:", err);
+    return { ok: false, executable: false };
+  }
+});
+
 // Simple fallback plan generator
 function generateFallbackPlan(input: string): any {
   const lower = input.toLowerCase();

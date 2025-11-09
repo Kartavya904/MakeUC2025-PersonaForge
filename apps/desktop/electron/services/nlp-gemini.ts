@@ -43,6 +43,10 @@ export class GeminiPlannerService {
         contents: fullPrompt,
       });
 
+      if (!response.text) {
+        throw new Error("No text in response");
+      }
+
       const text = response.text.trim();
       console.log("[GEMINI] Raw response:", text);
 
@@ -79,6 +83,48 @@ export class GeminiPlannerService {
         rawResponse: JSON.stringify(fallbackPlan, null, 2) 
       };
     }
+  }
+
+  /**
+   * Generate a conversational response for simple questions or greetings
+   * This is used when the user query doesn't require task execution
+   */
+  async generateConversationalResponse(userInput: string): Promise<string> {
+    const prompt = `You are a helpful AI assistant. The user has asked: "${userInput}"
+
+Respond naturally and conversationally. Keep your response brief and friendly (1-2 sentences). 
+If it's a greeting, respond warmly. If it's a question, answer it helpfully.
+Do not include any JSON or structured data - just a natural language response.`;
+
+    console.log("[GEMINI] Generating conversational response for:", userInput);
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: this.model,
+        contents: prompt,
+      });
+
+      if (!response.text) {
+        throw new Error("No text in response");
+      }
+
+      const text = response.text.trim();
+      console.log("[GEMINI] Conversational response:", text);
+      return text;
+    } catch (error: any) {
+      console.error("[GEMINI] Error generating conversational response:", error.message);
+      // Fallback response
+      return "I'm here to help! How can I assist you today?";
+    }
+  }
+
+  /**
+   * Check if a task plan is executable (has real actions beyond just Confirm)
+   */
+  isPlanExecutable(plan: TaskPlan): boolean {
+    // Check if plan has any steps that are actual actions (not just Confirm)
+    const executableOps = ["OpenApp", "SystemSetting", "Type", "Shortcut", "Message", "Navigate", "Click"];
+    return plan.steps.some(step => executableOps.includes(step.op));
   }
 
   /**

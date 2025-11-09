@@ -40,6 +40,12 @@ type OverlayApi = {
   generatePlan: (
     userInput: string
   ) => Promise<{ ok: boolean; plan?: any; rawResponse?: string; reason?: string }>;
+  isPlanExecutable: (
+    plan: any
+  ) => Promise<{ ok: boolean; executable?: boolean }>;
+  getConversationalResponse: (
+    userInput: string
+  ) => Promise<{ ok: boolean; response?: string; reason?: string }>;
   moveWindow: (deltaX: number, deltaY: number) => Promise<{ ok: boolean }>;
   showMainWindow: () => Promise<{ ok: boolean }>;
 };
@@ -169,7 +175,24 @@ function OverlayApp() {
         throw new Error("Plan generation not available");
       }
 
-      if (security && plan) {
+      // Check if the plan is executable (has real actions beyond just Confirm)
+      let isExecutable = false;
+      if (overlay.isPlanExecutable && plan) {
+        const executableResult = await overlay.isPlanExecutable(plan);
+        isExecutable = executableResult.ok && (executableResult.executable || false);
+        console.log("[overlay] Plan is executable:", isExecutable);
+      }
+
+      // If plan is not executable (e.g., simple questions, greetings), use conversational response
+      if (!isExecutable && overlay.getConversationalResponse) {
+        console.log("[overlay] Using conversational response for non-executable query");
+        const convResult = await overlay.getConversationalResponse(userInput);
+        if (convResult.ok && convResult.response) {
+          response = convResult.response;
+        } else {
+          response = convResult.response || "I'm here to help! How can I assist you today?";
+        }
+      } else if (security && plan) {
         // Validate plan with security
         const validation = await security.validatePlan(plan, userInput);
 
@@ -450,7 +473,24 @@ function OverlayApp() {
             throw new Error("Plan generation not available");
           }
 
-          if (security && plan) {
+          // Check if the plan is executable (has real actions beyond just Confirm)
+          let isExecutable = false;
+          if (overlay.isPlanExecutable && plan) {
+            const executableResult = await overlay.isPlanExecutable(plan);
+            isExecutable = executableResult.ok && (executableResult.executable || false);
+            console.log("[overlay] Plan is executable:", isExecutable);
+          }
+
+          // If plan is not executable (e.g., simple questions, greetings), use conversational response
+          if (!isExecutable && overlay.getConversationalResponse) {
+            console.log("[overlay] Using conversational response for non-executable query");
+            const convResult = await overlay.getConversationalResponse(userInput);
+            if (convResult.ok && convResult.response) {
+              response = convResult.response;
+            } else {
+              response = convResult.response || "I'm here to help! How can I assist you today?";
+            }
+          } else if (security && plan) {
             // Validate plan with security
             const validation = await security.validatePlan(plan, userInput);
 
