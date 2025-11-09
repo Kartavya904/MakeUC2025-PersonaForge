@@ -57,6 +57,7 @@ export async function sttStopAndTranscribe(): Promise<string> {
   const form = new FormData();
   form.append("file", new Blob([wav], { type: "audio/wav" }), "audio.wav");
   form.append("model_id", process.env.ELEVENLABS_STT_MODEL || "scribe_v1");
+  form.append("language_code", "en");
 
   const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
     method: "POST",
