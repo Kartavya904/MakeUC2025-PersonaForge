@@ -13,8 +13,12 @@
   height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: var(--overlay-fg);
-  -webkit-app-region: drag;
   user-select: none;
+}
+
+/* Only enable native drag for expanded overlay header */
+.overlay-expanded .overlay-header {
+  -webkit-app-region: drag;
 }
 
 .overlay-root * {
@@ -27,8 +31,14 @@
   justify-content: center;
   background: radial-gradient(circle, rgba(124, 157, 255, 0.2), rgba(57, 208, 255, 0.15));
   border-radius: 50%;
-  cursor: pointer;
+  cursor: grab;
   transition: transform 0.2s, box-shadow 0.2s;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.overlay-collapsed:active {
+  cursor: grabbing;
 }
 
 .overlay-collapsed:hover {
