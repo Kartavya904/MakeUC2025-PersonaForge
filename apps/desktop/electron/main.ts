@@ -635,7 +635,11 @@ app.whenReady().then(() => {
 
   const { behavior } = store.store;
   if (behavior.runAssistant && behavior.startListeningOnLaunch) {
-    console.log('[boot] start listening requested');
+    console.log('[boot] starting assistant on launch');
+    // Ensure tray is set up before starting
+    setupTray();
+    // Start the assistant (will create overlay and minimize main window)
+    startAssistantFromTray();
   }
   
   console.log('[SECURITY] Security service initialized');
