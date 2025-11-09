@@ -14,6 +14,23 @@
   --accentB: #7bffb4;
 }
 
+/* Global body/html styles to prevent white borders */
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     --bg: #f6f7fb;
@@ -29,17 +46,26 @@
     --accentA: #1fa7ff;
     --accentB: #00cf88;
   }
+  
+  html, body, #root {
+    background: var(--bg);
+  }
 }
 
 /* Layout shells */
 .lp-root {
   position: relative;
   min-height: 100vh;
+  width: 100%;
+  height: 100vh;
   color: var(--fg);
   background: var(--bg);
   overflow-x: hidden;
+  overflow-y: auto;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  padding: 0;
 }
 
 /* Animated gradient + subtle grid/noise */
