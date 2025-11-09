@@ -9,6 +9,7 @@ type OverlayApi = {
   ttsSpeak: (text: string) => Promise<{ ok: boolean; audioBase64?: string; mime?: string; reason?: string }>;
   expand: () => Promise<{ ok: boolean }>;
   collapse: () => Promise<{ ok: boolean }>;
+  generatePlan: (userInput: string) => Promise<{ ok: boolean; plan?: any; reason?: string }>;
 };
 
 type SecurityApi = {
@@ -41,14 +42,11 @@ function OverlayApp() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [listening, setListening] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [wakeWordActive, setWakeWordActive] = useState(false);
   const [killSwitchActive, setKillSwitchActive] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const workletNodeRef = useRef<AudioWorkletNode | null>(null);
-  const wakeWordIntervalRef = useRef<number | null>(null);
-  const recordingTimeoutRef = useRef<number | null>(null);
 
   // Check kill switch status on mount and periodically
   useEffect(() => {
@@ -72,125 +70,12 @@ function OverlayApp() {
     }
   }, [messages]);
 
-  // Start wake word detection when overlay is created (collapsed state)
-  useEffect(() => {
-    if (!expanded && overlay && !wakeWordActive) {
-      startWakeWordDetection();
+  const handleIconClick = async () => {
+    // Click icon to expand
+    if (!expanded && overlay) {
+      await overlay.expand();
+      setExpanded(true);
     }
-    return () => {
-      stopWakeWordDetection();
-    };
-  }, [expanded, overlay]);
-
-  const handleClick = async () => {
-    // Only allow click to collapse when expanded
-    if (expanded && !listening && !processing) {
-      await handleCollapse();
-    }
-  };
-
-  const startWakeWordDetection = async () => {
-    if (!overlay || wakeWordActive || expanded) return;
-
-    try {
-      setWakeWordActive(true);
-      
-      // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-
-      // Create audio context for wake word detection
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      audioContextRef.current = audioContext;
-
-      // Simple audio processing (no VAD needed for wake word)
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      
-      processor.onaudioprocess = (e) => {
-        if (expanded) return; // Don't process if expanded
-        const inputData = e.inputBuffer.getChannelData(0);
-        const int16 = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          int16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-        }
-        overlay.sttPush(int16.buffer);
-      };
-      
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-      workletNodeRef.current = processor as any;
-
-      // Start STT for wake word detection
-      await overlay.sttStart();
-
-      // Check for wake word every 1 second
-      wakeWordIntervalRef.current = window.setInterval(async () => {
-        if (expanded) return; // Don't check if already expanded
-
-        try {
-          const result = await overlay.sttStop();
-          
-          if (result.ok && result.text) {
-            const text = result.text.toLowerCase().trim();
-            console.log('[wake-word] Checking:', text);
-            
-            if (text.includes('chad')) {
-              console.log('[wake-word] Detected! Expanding and starting recording...');
-              stopWakeWordDetection();
-              // Expand overlay and start recording
-              await overlay.expand();
-              setExpanded(true);
-              // Small delay then start recording
-              setTimeout(() => {
-                startRecording();
-              }, 300);
-              return;
-            }
-          }
-
-          // Restart listening
-          await overlay.sttStart();
-        } catch (err: any) {
-          console.error('[wake-word] Error:', err);
-          try {
-            await overlay.sttStart();
-          } catch (e) {
-            stopWakeWordDetection();
-          }
-        }
-      }, 1000);
-
-    } catch (err: any) {
-      console.error('[overlay] Failed to start wake word detection:', err);
-      setWakeWordActive(false);
-    }
-  };
-
-  const stopWakeWordDetection = async () => {
-    if (wakeWordIntervalRef.current !== null) {
-      clearInterval(wakeWordIntervalRef.current);
-      wakeWordIntervalRef.current = null;
-    }
-
-    if (mediaStreamRef.current && !expanded) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-
-    if (audioContextRef.current && !expanded) {
-      await audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
-    workletNodeRef.current = null;
-
-    try {
-      await overlay?.sttStop();
-    } catch (e) {
-      // Ignore errors
-    }
-
-    setWakeWordActive(false);
   };
 
   const startRecording = async () => {
@@ -227,14 +112,6 @@ function OverlayApp() {
       // Start STT
       await overlay.sttStart();
 
-      // Auto-stop after 6 seconds
-      recordingTimeoutRef.current = window.setTimeout(async () => {
-        if (listening) {
-          console.log('[recording] Auto-stopping after 6 seconds');
-          await stopRecording();
-        }
-      }, 6000);
-
     } catch (err: any) {
       console.error('[overlay] Failed to start recording:', err);
       setListening(false);
@@ -243,12 +120,6 @@ function OverlayApp() {
 
   const stopRecording = async () => {
     if (!overlay || !listening) return;
-
-    // Clear timeout
-    if (recordingTimeoutRef.current !== null) {
-      clearTimeout(recordingTimeoutRef.current);
-      recordingTimeoutRef.current = null;
-    }
 
     try {
       setListening(false);
@@ -296,14 +167,23 @@ function OverlayApp() {
           return;
         }
 
-        // Generate task plan using Gemini (if available) or use dummy response
+        // Generate task plan using Gemini NLP service
         let response = '';
         let plan: any = null;
 
         try {
-          // Try to get plan from Gemini via IPC (would need to be added to main process)
-          // For now, we'll use a simple plan generator
-          plan = generateSimplePlan(userInput);
+          // Get plan from Gemini via IPC
+          if (overlay.generatePlan) {
+            const planResult = await overlay.generatePlan(userInput);
+            if (planResult.ok && planResult.plan) {
+              plan = planResult.plan;
+              console.log('[overlay] Generated plan:', plan);
+            } else {
+              throw new Error(planResult.reason || 'Failed to generate plan');
+            }
+          } else {
+            throw new Error('Plan generation not available');
+          }
           
           if (security && plan) {
             // Validate plan with security
@@ -319,7 +199,7 @@ function OverlayApp() {
                 approved = consent.ok && (consent.approved || false);
                 
                 if (!approved) {
-                  response = 'Action was denied.';
+                  response = 'Action was denied or cancelled.';
                 }
               }
 
@@ -327,23 +207,19 @@ function OverlayApp() {
                 // Execute task
                 const execResult = await security.executeTask(plan, userInput);
                 if (execResult.ok && execResult.success) {
-                  response = `Task completed successfully. ${plan.task}`;
+                  const stepsInfo = execResult.executedSteps ? ` (${execResult.executedSteps} steps completed)` : '';
+                  response = `✓ Task completed successfully${stepsInfo}: ${plan.task}`;
                 } else {
-                  response = `Task execution failed: ${execResult.error || 'Unknown error'}`;
+                  response = `✗ Task execution failed: ${execResult.error || 'Unknown error'}`;
                 }
               }
             }
           } else {
-            // Fallback to dummy response if security not available
-            response = generateDummyResponse(userInput);
+            response = 'Security service not available';
           }
         } catch (err: any) {
           console.error('[overlay] Error processing task:', err);
-          response = `I encountered an error: ${err?.message || 'Unknown error'}`;
-        }
-
-        if (!response) {
-          response = generateDummyResponse(userInput);
+          response = `✗ Error: ${err?.message || 'Unknown error'}`;
         }
 
         console.log('[recording] Response:', response);
@@ -360,14 +236,7 @@ function OverlayApp() {
         await speakText(response);
       }
 
-      // Collapse back to small icon and restart wake word detection
-      setTimeout(async () => {
-        await overlay.collapse();
-        setExpanded(false);
-        setTimeout(() => {
-          startWakeWordDetection();
-        }, 500);
-      }, 2000);
+      // No auto-collapse - keep the UI expanded for user interaction
 
     } catch (err: any) {
       console.error('[overlay] Failed to stop recording:', err);
@@ -376,57 +245,6 @@ function OverlayApp() {
     }
   };
 
-
-  const generateDummyResponse = (input: string): string => {
-    // Simple dummy responses for now
-    const lower = input.toLowerCase();
-    if (lower.includes('hello') || lower.includes('hi')) {
-      return 'Hello! How can I help you today?';
-    }
-    if (lower.includes('time')) {
-      return `The current time is ${new Date().toLocaleTimeString()}.`;
-    }
-    if (lower.includes('weather')) {
-      return 'I don\'t have access to weather data yet, but I\'m working on it!';
-    }
-    return `I heard you say: "${input}". This is a dummy response for now.`;
-  };
-
-  const generateSimplePlan = (input: string): any => {
-    // Simple plan generator - in production, this would call Gemini
-    const lower = input.toLowerCase();
-    
-    if (lower.includes('brightness')) {
-      const match = input.match(/(\d+)\s*%?/);
-      const value = match ? match[1] : '50';
-      return {
-        task: `Set brightness to ${value}%`,
-        risk: 'low' as const,
-        steps: [
-          { op: 'SystemSetting', target: 'display.brightness', value }
-        ]
-      };
-    }
-    
-    if (lower.includes('open') && lower.includes('settings')) {
-      return {
-        task: 'Open Windows Settings',
-        risk: 'low' as const,
-        steps: [
-          { op: 'OpenApp', app: 'ms-settings:' }
-        ]
-      };
-    }
-    
-    // Default: just confirm
-    return {
-      task: input,
-      risk: 'low' as const,
-      steps: [
-        { op: 'Confirm', text: `I heard: "${input}"` }
-      ]
-    };
-  };
 
   const speakText = async (text: string) => {
     if (!overlay) return;
@@ -454,9 +272,6 @@ function OverlayApp() {
     if (listening) await stopRecording();
     await overlay.collapse();
     setExpanded(false);
-    setTimeout(() => {
-      startWakeWordDetection();
-    }, 500);
   };
 
   if (!overlay) {
@@ -469,7 +284,7 @@ function OverlayApp() {
 
   if (!expanded) {
     return (
-      <div className="overlay-root overlay-collapsed" onClick={handleClick}>
+      <div className="overlay-root overlay-collapsed" onClick={handleIconClick}>
         <div className="overlay-icon">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
@@ -504,7 +319,7 @@ function OverlayApp() {
         )}
         {messages.length === 0 && !listening && !processing && (
           <div className="overlay-empty">
-            <p>Say "Chad" to activate</p>
+            <p>Click "Start Recording" to begin</p>
             {killSwitchActive && <p style={{ color: '#ff4444', fontSize: '11px' }}>Kill switch is active</p>}
           </div>
         )}
@@ -520,23 +335,41 @@ function OverlayApp() {
       </div>
 
       <div className="overlay-controls">
+        {!listening && !processing && (
+          <button 
+            className="overlay-record-btn" 
+            onClick={startRecording}
+            disabled={killSwitchActive}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="18" x2="12" y2="22"/>
+              <line x1="8" y1="22" x2="16" y2="22"/>
+            </svg>
+            Start Recording
+          </button>
+        )}
         {listening && (
-          <div className="overlay-listening-status">
+          <div className="overlay-listening-controls">
             <div className="overlay-listening-indicator"></div>
-            <span>Recording... (auto-stops in 6 seconds)</span>
+            <span className="overlay-listening-text">Recording...</span>
             <button 
               className="overlay-stop-btn" 
-              onClick={async () => {
-                console.log('[user] Stop recording clicked');
-                await stopRecording();
-              }}
+              onClick={stopRecording}
             >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="4" y="4" width="16" height="16" rx="2"/>
+              </svg>
               Stop Recording
             </button>
           </div>
         )}
         {processing && (
-          <div className="overlay-processing">Processing your request...</div>
+          <div className="overlay-processing">
+            <div className="overlay-processing-spinner"></div>
+            <span>Processing your request...</span>
+          </div>
         )}
       </div>
     </div>

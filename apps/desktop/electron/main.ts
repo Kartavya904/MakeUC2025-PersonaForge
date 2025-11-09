@@ -20,10 +20,21 @@ type AppSettings = import('../renderer/types/settings').AppSettings;
 import { getSecurityService } from './services/security.js';
 import { SecurityConsentService } from './services/security-consent.js';
 import { SecureTaskExecutor } from './services/task-executor.js';
+import { GeminiPlannerService } from './services/nlp-gemini.js';
 
 let securityService = getSecurityService();
 let consentService = new SecurityConsentService(securityService);
 let taskExecutor = new SecureTaskExecutor(securityService, consentService);
+let geminiService: GeminiPlannerService | null = null;
+
+// Initialize Gemini service if API key is available
+const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+if (geminiApiKey) {
+  geminiService = new GeminiPlannerService(geminiApiKey);
+  console.log('[GEMINI] Service initialized');
+} else {
+  console.warn('[GEMINI] No API key found - NLP features will be limited');
+}
 
 // ----- Persistent settings -----
 const store = new Store<AppSettings>({
@@ -463,6 +474,70 @@ ipcMain.handle('security:get-audit-logs', async (_e, limit?: number) => {
   const logs = securityService.getAuditLogs(limit);
   return { ok: true, logs };
 });
+
+// ----- NLP/Gemini Handler -----
+ipcMain.handle('nlp:generate-plan', async (_e, userInput: string) => {
+  try {
+    if (!geminiService) {
+      // Fallback to simple plan if Gemini is not available
+      return { 
+        ok: true, 
+        plan: generateFallbackPlan(userInput)
+      };
+    }
+    
+    const plan = await geminiService.generateTaskPlan(userInput);
+    return { ok: true, plan };
+  } catch (err: any) {
+    console.error('[NLP] Error generating plan:', err);
+    // Return fallback plan on error
+    return { 
+      ok: true, 
+      plan: generateFallbackPlan(userInput)
+    };
+  }
+});
+
+// Simple fallback plan generator
+function generateFallbackPlan(input: string): any {
+  const lower = input.toLowerCase();
+  
+  if (lower.includes('brightness')) {
+    const match = input.match(/(\d+)\s*%?/);
+    const value = match ? match[1] : '50';
+    return {
+      task: `Set brightness to ${value}%`,
+      risk: 'low' as const,
+      steps: [{ op: 'SystemSetting', target: 'display.brightness', value }]
+    };
+  }
+  
+  if (lower.includes('open') && (lower.includes('settings') || lower.includes('setting'))) {
+    return {
+      task: 'Open Windows Settings',
+      risk: 'low' as const,
+      steps: [{ op: 'OpenApp', app: 'ms-settings:' }]
+    };
+  }
+
+  if (lower.includes('open')) {
+    // Extract app name after "open"
+    const match = input.match(/open\s+(\w+)/i);
+    const app = match ? match[1] : 'notepad';
+    return {
+      task: `Open ${app}`,
+      risk: 'low' as const,
+      steps: [{ op: 'OpenApp', app }]
+    };
+  }
+  
+  // Default: confirmation
+  return {
+    task: input,
+    risk: 'low' as const,
+    steps: [{ op: 'Confirm', text: `Processing: "${input}"` }]
+  };
+}
 
 ipcMain.handle('task:execute', async (_e, plan: any, userInput: string) => {
   try {

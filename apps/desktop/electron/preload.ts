@@ -18,7 +18,8 @@ contextBridge.exposeInMainWorld('overlay', {
   sttStop: () => ipcRenderer.invoke('overlay:stt:stop'),
   ttsSpeak: (text: string) => ipcRenderer.invoke('overlay:tts:speak', text),
   expand: () => ipcRenderer.invoke('overlay:expand'),
-  collapse: () => ipcRenderer.invoke('overlay:collapse')
+  collapse: () => ipcRenderer.invoke('overlay:collapse'),
+  generatePlan: (userInput: string) => ipcRenderer.invoke('nlp:generate-plan', userInput)
 });
 
 // Security API
