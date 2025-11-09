@@ -3,7 +3,11 @@
  * Validates and assesses risk of operations before execution
  */
 
-import { TaskPlan, TaskStep } from "../nlp-gemini";
+// Accept TaskPlan/TaskStep from either security.ts or nlp-gemini.ts (they're compatible)
+import type { TaskPlan as SecurityTaskPlan, TaskStep as SecurityTaskStep } from "../security.js";
+import type { TaskPlan as GeminiTaskPlan, TaskStep as GeminiTaskStep } from "../nlp-gemini.js";
+type TaskPlan = SecurityTaskPlan | GeminiTaskPlan;
+type TaskStep = SecurityTaskStep | GeminiTaskStep;
 
 export interface SafetyCheckResult {
   safe: boolean;

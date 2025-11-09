@@ -3,7 +3,10 @@
  * Smart agents that can run tasks in parallel when safe
  */
 
-import { TaskStep } from "../nlp-gemini";
+// Accept TaskStep from either security.ts or nlp-gemini.ts (they're compatible)
+import type { TaskStep as SecurityTaskStep } from "../security.js";
+import type { TaskStep as GeminiTaskStep } from "../nlp-gemini.js";
+type TaskStep = SecurityTaskStep | GeminiTaskStep;
 
 export interface ExecutionTask {
   step: TaskStep;

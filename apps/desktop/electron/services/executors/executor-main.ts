@@ -3,13 +3,18 @@
  * Parallel execution where possible
  */
 
-import { TaskPlan, TaskStep } from "../nlp-gemini";
-import { executeOpenApp, OpenAppStep } from "./executor-openapp";
-import { executeSystemSetting, SystemSettingStep } from "./executor-system";
-import { executeType, executeShortcut, TypeStep, ShortcutStep } from "./executor-keyboard";
-import { executeMessage, MessageStep } from "./executor-message";
-import { checkTaskSafety, validateStep } from "./executor-safety";
-import { createExecutionPlan, executeWithAgents } from "./executor-agent";
+// Accept TaskPlan from either security.ts or nlp-gemini.ts (they're compatible)
+import type { TaskPlan as SecurityTaskPlan, TaskStep as SecurityTaskStep } from "../security.js";
+import type { TaskPlan as GeminiTaskPlan, TaskStep as GeminiTaskStep } from "../nlp-gemini.js";
+type TaskPlan = SecurityTaskPlan | GeminiTaskPlan;
+type TaskStep = SecurityTaskStep | GeminiTaskStep;
+
+import { executeOpenApp, OpenAppStep } from "./executor-openapp.js";
+import { executeSystemSetting, SystemSettingStep } from "./executor-system.js";
+import { executeType, executeShortcut, TypeStep, ShortcutStep } from "./executor-keyboard.js";
+import { executeMessage, MessageStep } from "./executor-message.js";
+import { checkTaskSafety, validateStep } from "./executor-safety.js";
+import { createExecutionPlan, executeWithAgents } from "./executor-agent.js";
 
 export interface ExecutionResult {
   success: boolean;
@@ -106,8 +111,18 @@ async function executeStep(step: TaskStep): Promise<string> {
     case "Type":
       return await executeType(step as TypeStep);
     
-    case "Shortcut":
-      return await executeShortcut(step as ShortcutStep);
+    case "Shortcut": {
+      const shortcutStep = step as ShortcutStep;
+      // Check if it's a media control shortcut
+      if (shortcutStep.keys && shortcutStep.keys.length === 1) {
+        const key = shortcutStep.keys[0].toLowerCase();
+        if (["play", "pause", "playpause", "next", "previous", "stop"].includes(key)) {
+          const { executeMediaControl } = await import("./executor-keyboard.js");
+          return await executeMediaControl(key as any);
+        }
+      }
+      return await executeShortcut(shortcutStep);
+    }
     
     case "Message":
       return await executeMessage(step as MessageStep);
