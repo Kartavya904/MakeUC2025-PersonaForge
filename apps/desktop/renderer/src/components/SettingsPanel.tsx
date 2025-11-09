@@ -442,12 +442,15 @@ const STYLES = `
 }
 
 /* Full-bleed background - absolutely no white borders or padding */
+.sp-root, .sp-root *, .sp-root *::before, .sp-root *::after{
+  font-family: "Times New Roman", Times, serif !important;
+}
 .sp-root{
   position:fixed; top:0; left:0; right:0; bottom:0;
   width:100vw; height:100vh; 
   margin:0; padding:0; 
   color:var(--sp-fg);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: "Times New Roman", Times, serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: radial-gradient(60% 60% at 10% 10%, rgba(124,157,255, .12), transparent 60%),
@@ -498,7 +501,7 @@ const STYLES = `
   border:1px solid var(--sp-border); border-radius:24px; padding:32px; box-shadow:0 20px 80px rgba(0,0,0,.25);
 }
 .sp-aside .sp-kv{ display:flex; align-items:center; justify-content:space-between; padding:12px 0; font-size:16px; }
-.sp-aside .sp-code{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+.sp-aside .sp-code{ font-family: "Times New Roman", Times, serif; }
 
 .sp-section{ display:flex; flex-direction:column; gap:24px; }
 .sp-h3{ font-size:26px; font-weight:800; margin-bottom:4px; }
@@ -510,6 +513,7 @@ const STYLES = `
 .sp-tone{
   text-align:left; border-radius:18px; border:1px solid var(--sp-border); padding:18px;
   background:var(--sp-card); transition:.15s transform, .2s border-color, .2s box-shadow;
+  color:var(--sp-fg);
 }
 .sp-tone:hover{ transform: translateY(-1px); border-color:var(--sp-bright); box-shadow:0 10px 26px rgba(0,0,0,.25); }
 .sp-tone.is-on{ border-color:transparent; background:linear-gradient(135deg, var(--sp-primary), var(--sp-accent)); color:#0b0f1a; }
@@ -520,7 +524,7 @@ const STYLES = `
 .sp-label{ min-width:200px; font-weight:700; color:var(--sp-muted); font-size:17px; }
 .sp-select{
   flex:1; height:48px; padding:0 18px; border-radius:14px; border:1px solid var(--sp-border);
-  background:var(--sp-bg2); color:var(--sp-fg); font-size:16px;
+  background:var(--sp-bg2); color:var(--sp-fg); font-size:16px; font-family: "Times New Roman", Times, serif;
 }
 
 .sp-slider-grid{ display:grid; gap:20px; grid-template-columns:1fr; }

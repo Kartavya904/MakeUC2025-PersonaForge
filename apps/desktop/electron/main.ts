@@ -340,7 +340,7 @@ function createOverlayWindow() {
   // Make window draggable
   overlayWin.setIgnoreMouseEvents(false);
 
-  // Strictly enforce 80x80 size when collapsed - check on every resize event
+  // Handle resize events - enforce size when collapsed, allow resizing when expanded
   overlayWin.on('resize', () => {
     if (!overlayWin) return;
     const [w, h] = overlayWin.getSize();
@@ -352,6 +352,12 @@ function createOverlayWindow() {
       overlayWin.setMinimumSize(80, 80);
       overlayWin.setMaximumSize(80, 80);
       overlayWin.setSize(80, 80);
+    } else if (!isCollapsed) {
+      // When expanded, ensure minimum and maximum sizes are set
+      const primaryDisplay = screen.getPrimaryDisplay();
+      const { width, height } = primaryDisplay.workAreaSize;
+      overlayWin.setMinimumSize(300, 400);
+      overlayWin.setMaximumSize(Math.floor(width * 0.9), Math.floor(height * 0.9));
     }
   });
   
@@ -651,6 +657,9 @@ ipcMain.handle('overlay:expand', async () => {
   overlayWin.setSize(newWidth, newHeight);
   overlayWin.setPosition(Math.round(newX), Math.round(newY));
   overlayWin.setResizable(true);
+  // Set minimum and maximum sizes to allow resizing while maintaining usability
+  overlayWin.setMinimumSize(300, 400);
+  overlayWin.setMaximumSize(Math.floor(width * 0.9), Math.floor(height * 0.9));
   return { ok: true };
 });
 
