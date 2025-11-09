@@ -29,9 +29,7 @@ type OverlayApi = {
   sttStart: () => Promise<{ ok: boolean; reason?: string }>;
   sttPush: (chunk: ArrayBuffer) => Promise<{ ok: boolean }>;
   sttStop: () => Promise<{ ok: boolean; text?: string; reason?: string }>;
-  ttsSpeak: (
-    text: string
-  ) => Promise<{
+  ttsSpeak: (text: string) => Promise<{
     ok: boolean;
     audioBase64?: string;
     mime?: string;
